@@ -1,6 +1,6 @@
 """Portable installation and release checks without any database or network."""
 from pathlib import Path
-import importlib.util,json,subprocess,sys,tempfile,unittest
+import hashlib,importlib.util,json,subprocess,sys,tempfile,unittest
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,path):
     spec=importlib.util.spec_from_file_location(name,ROOT/path);result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
@@ -8,7 +8,81 @@ gate=module('release_gate','scripts/check_release.py')
 setup=module('environment_setup','scripts/setup_env.py')
 container_check=module('container_install_check','scripts/check_container_install.py')
 
+
+def tiny_synthetic_jpeg(width=1,height=1,extra=b''):
+    """One baseline grayscale block; only synthetic pixels and thumbnail-free JFIF."""
+    def segment(marker,payload): return b'\xff'+bytes([marker])+(len(payload)+2).to_bytes(2,'big')+payload
+    counts=b'\x01'+b'\x00'*15
+    return (b'\xff\xd8'+extra
+            +segment(0xe0,b'JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00')
+            +segment(0xdb,b'\x00'+b'\x01'*64)
+            +segment(0xc0,b'\x08'+height.to_bytes(2,'big')+width.to_bytes(2,'big')+b'\x01\x01\x11\x00')
+            +segment(0xc4,b'\x00'+counts+b'\x00'+b'\x10'+counts+b'\x00')
+            +segment(0xda,b'\x01\x01\x00\x00\x3f\x00')+b'\x3f\xff\xd9')
+
+
+def write_screenshot_review(root,raw=None,**changes):
+    name='docs/screenshots/pm/01-home.jpg'
+    raw=tiny_synthetic_jpeg() if raw is None else raw
+    image=root/name;image.parent.mkdir(parents=True,exist_ok=True);image.write_bytes(raw)
+    entry={'path':name,'role':'pm','title':'Synthetic PM screen','sha256':hashlib.sha256(raw).hexdigest(),
+           'width':1,'height':1,'reviewed_synthetic':True,**changes}
+    review={'schema_version':1,'source_commit':'a'*40,'images':[entry]}
+    (root/gate.SCREENSHOT_MANIFEST).write_text(json.dumps(review),encoding='utf-8')
+    return [name,gate.SCREENSHOT_MANIFEST]
+
+
 class PublicReleaseTests(unittest.TestCase):
+    def test_only_individually_reviewed_synthetic_jpegs_are_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);paths=write_screenshot_review(root)
+            result=gate.audit(root,paths)
+            self.assertTrue(result['pass']);self.assertEqual(result['files'],2)
+            self.assertEqual(gate.jpeg_dimensions((root/paths[0]).read_bytes()),(1,1))
+            self.assertFalse(gate.audit(root,[paths[0]])['pass'],'Review manifest must also be published')
+            outside=root/'docs/other.jpg';outside.write_bytes(tiny_synthetic_jpeg())
+            self.assertFalse(gate.audit(root,['docs/other.jpg'])['pass'])
+
+    def test_screenshot_review_binds_role_hash_dimensions_and_explicit_review(self):
+        for changes in ({'reviewed_synthetic':False},{'reviewed_synthetic':1},{'role':'admin'},
+                        {'sha256':'0'*64},{'width':2},{'height':4097},{'width':True}):
+            with self.subTest(changes=changes),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);paths=write_screenshot_review(root,**changes)
+                self.assertFalse(gate.audit(root,paths)['pass'])
+
+    def test_screenshot_metadata_and_broken_or_trailing_jpeg_are_rejected(self):
+        def segment(marker,payload): return b'\xff'+bytes([marker])+(len(payload)+2).to_bytes(2,'big')+payload
+        for raw in (tiny_synthetic_jpeg(extra=segment(0xe1,b'Exif\x00\x00synthetic')),
+                    tiny_synthetic_jpeg(extra=segment(0xe1,b'http://ns.adobe.com/xap/1.0/\x00synthetic')),
+                    tiny_synthetic_jpeg(extra=segment(0xfe,b'synthetic comment')),
+                    tiny_synthetic_jpeg(extra=segment(0xee,b'Adobe')),
+                    tiny_synthetic_jpeg()[:-1],tiny_synthetic_jpeg()+b'trailing',
+                    b'\xff\xd8\xff\xd9',tiny_synthetic_jpeg().replace(b'\xff\xdb\x00C',b'\xff\xdb\xff\xff',1)):
+            with self.subTest(raw_length=len(raw)),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);paths=write_screenshot_review(root,raw)
+                self.assertFalse(gate.audit(root,paths)['pass'])
+
+    def test_screenshot_manifest_cannot_allow_missing_or_unsafe_paths(self):
+        for changes in ({'path':'docs/screenshots/pm/../other.jpg'},
+                        {'path':'docs/screenshots/pm/home.jpg'}, {'path':'data/private.jpg'}):
+            with self.subTest(changes=changes),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);paths=write_screenshot_review(root,**changes)
+                self.assertFalse(gate.audit(root,paths)['pass'])
+        with tempfile.TemporaryDirectory() as directory:
+            address='private'+'@'+'organization.example'
+            root=Path(directory);paths=write_screenshot_review(root,title='Synthetic contact '+address)
+            result=gate.audit(root,paths)
+            self.assertFalse(result['pass'])
+            self.assertTrue(any(item['rule']=='nonexample-email' for item in result['findings']))
+
+    def test_screenshot_symlinks_are_not_reviewed_files(self):
+        with tempfile.TemporaryDirectory() as directory,tempfile.TemporaryDirectory() as outside:
+            root=Path(directory);paths=write_screenshot_review(root);image=root/paths[0]
+            target=Path(outside)/'screen.jpg';target.write_bytes(image.read_bytes());image.unlink()
+            try: image.symlink_to(target)
+            except (OSError,NotImplementedError): self.skipTest('Symlink creation unavailable')
+            self.assertFalse(gate.audit(root,paths)['pass'])
+
     def test_container_readiness_retries_transient_startup_resets(self):
         import http.client,io
         from unittest.mock import Mock

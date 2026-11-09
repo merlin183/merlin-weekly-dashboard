@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "source_commit": "1286b1ea07a8c5d46c4c7995b37380d093264e4f",
+  "captured_at": "2026-11-09",
+  "notes": "Synthetic role examples; external business data and credentials are absent.",
+  "images": [
+    {
+      "path": "docs/screenshots/pm/01-home.jpg",
+      "role": "pm",
+      "title": "PM 기본 화면",
+      "sha256": "20699d2bd83502ddba5c9b23011874ca26ddd5cd33518ebd7277b2c10f7e779b",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/02-report.jpg",
+      "role": "pm",
+      "title": "PM 팀원별 주간 보고",
+      "sha256": "092a1e16d04692310d659ada779b7c46775c0f2d79ca395de28fd8d313bf0d69",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/19-checklist.jpg",
+      "role": "pm",
+      "title": "PM 주간 체크리스트",
+      "sha256": "82f003e22731edde9050637917059ec395c6957b3c3117ae749d44e08c651768",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/20-project-hierarchy.jpg",
+      "role": "pm",
+      "title": "PM 프로젝트 계층",
+      "sha256": "06b6bbb027fd3ce18f0e849ffd716d99f5027418f14abda15a8c0e632c439d55",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/03-calendar.jpg",
+      "role": "pm",
+      "title": "PM 일정 달력",
+      "sha256": "d4065f43575ee79e1cf1c746b52e4971ef97c5aab86bfb7368989c7770a72a77",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/04-meetings.jpg",
+      "role": "pm",
+      "title": "PM 회의록과 공유 메모",
+      "sha256": "510b6fcfbff855a03c7c58763cbe7c84df7694a69c12e0876a2503ab0605d3d4",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/05-expenses.jpg",
+      "role": "pm",
+      "title": "PM 비용 목록",
+      "sha256": "86a8519fd1b6c22761826f7c76205279c5790533f9377fbd607ff04d2d8b23c4",
+      "width": 1664,
+      "height": 932,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/06-expense-form.jpg",
+      "role": "pm",
+      "title": "PM 비용 등록 양식",
+      "sha256": "3dda02653755f1019921ff5dd5a42d7f642cc9852944aaa550df5074c6d99c1b",
+      "width": 1664,
+      "height": 932,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/07-attendance.jpg",
+      "role": "pm",
+      "title": "PM 출퇴근과 월간 요약",
+      "sha256": "12df8ea5eff4ae210e89d82cbc94e7a153e3280a391d9431e7f4983f4a13cf8d",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/08-attendance-detail.jpg",
+      "role": "pm",
+      "title": "PM 월간·연간 출퇴근 상세",
+      "sha256": "f82accfd6f89bd2efcd227229aa88648401ba9ce624b916281f75effcaa0a438",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/09-leave.jpg",
+      "role": "pm",
+      "title": "PM 연차 현황",
+      "sha256": "1289b7ff812684ba185096cbbf00ad7528fcfe1a42b9fa28ad8bcae5abe70518",
+      "width": 1664,
+      "height": 932,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/10-hr-calendar.jpg",
+      "role": "pm",
+      "title": "PM 근태 캘린더",
+      "sha256": "864ae36938829de34d2bc901c876948b7b9c831f45157af45f37e3c94f5796d1",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/11-approvals.jpg",
+      "role": "pm",
+      "title": "PM 전자결재 목록",
+      "sha256": "f92d3d470f31e0057f59442e634ee1c021312174f07de3329fa72567a378535c",
+      "width": 1664,
+      "height": 932,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/12-approval-detail.jpg",
+      "role": "pm",
+      "title": "PM 전자결재 상세",
+      "sha256": "8f1c768e90be813fc4721342a114225b6e1e204145292a8d697e39c7ea2d78a4",
+      "width": 1664,
+      "height": 932,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/13-settings.jpg",
+      "role": "pm",
+      "title": "PM 설정 탭",
+      "sha256": "14906650cdbae6428eaac4a92be7326f6c147ebfc0fb70d8e6c37030246a3a8e",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/15-approvers.jpg",
+      "role": "pm",
+      "title": "PM 승인선 설정",
+      "sha256": "3f1a1919f19ed7857a5ab25a94bf1f03e156bfd0911942efd27a816c8f3a42bd",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/16-users.jpg",
+      "role": "pm",
+      "title": "PM 사용자 관리",
+      "sha256": "39e2ed2f191f0a72dfb8565c5cb74aff9c449c9d9f8cb1b9d896440e2c16e689",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/17-automation.jpg",
+      "role": "pm",
+      "title": "PM 자동화와 연동 설정",
+      "sha256": "dafd05d7c59c0d031fb4194d48d791eb9d4ab7529012e20d7cfa945c07db89f9",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/18-export-audit.jpg",
+      "role": "pm",
+      "title": "PM 내보내기와 감사 로그",
+      "sha256": "870dbfb9075c5f76eced7631054954f3de40d7a83dee01b8b0570ec690cc606d",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/pm/14-project-form.jpg",
+      "role": "pm",
+      "title": "PM 프로젝트 입력 양식",
+      "sha256": "aa76e50a24cd5142abdedc1b5fa4b96a8026e2d38db1866621e21e11797db587",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/admin/01-executive-home.jpg",
+      "role": "admin",
+      "title": "관리자 전용 경영 홈",
+      "sha256": "9b139c26b6f590417fcfbabe326f4e08e77e19574a1b33af45d77f03f3c7d03f",
+      "width": 1660,
+      "height": 930,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/admin/02-final-approval.jpg",
+      "role": "admin",
+      "title": "관리자 최종 승인 대기 문서",
+      "sha256": "1caddcc2dbcc099b4df7589169a8ca56415e1218a341e56c923ac5c11d7c433a",
+      "width": 1664,
+      "height": 932,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/cs/01-metrics.jpg",
+      "role": "cs",
+      "title": "별도 CS 지표",
+      "sha256": "171731d0eba253dfe452e14a0dd8bb39d8e9923f93db6fc33960ca0b3598b8a6",
+      "width": 1265,
+      "height": 712,
+      "reviewed_synthetic": true
+    },
+    {
+      "path": "docs/screenshots/cs/02-consultations.jpg",
+      "role": "cs",
+      "title": "별도 CS 상담일지",
+      "sha256": "70e5e19b7e1e3f419f9117979f7d34f95a174d9865fdb8e99cb38c5080ec5472",
+      "width": 1265,
+      "height": 712,
+      "reviewed_synthetic": true
+    }
+  ]
+}
