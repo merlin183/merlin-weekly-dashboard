@@ -111,9 +111,76 @@ class InstallationSecurityTests(unittest.TestCase):
                 self.assertIn(index.group(1), created_tables, "Index creation must follow its table on first boot")
                 indexed_tables.add(index.group(1))
         conn.cur.execute = execute
-        with patch.object(M, "DATABASE_URL", "postgresql://localhost/disposable"), patch.object(M, "_pg_conn", return_value=conn), patch.object(M._installation, "env_bool", return_value=False):
+        with patch.object(M, "DATABASE_URL", "postgresql://localhost/disposable"), patch.object(M.psycopg2, "connect", return_value=Connection()), patch.object(M, "_pg_conn", return_value=conn), patch.object(M._installation, "env_bool", return_value=False):
             M.initialize_schema()
         self.assertEqual(indexed_tables, {"ext_exec_status", "ext_leave_balance", "ext_daily_metrics"})
+
+    def test_schema_lock_spans_all_helpers_and_optional_seed_then_commits(self):
+        events, locked = [], {"active": False}
+        guard, pooled = Connection(), Connection()
+        guard.close = unittest.mock.Mock(side_effect=lambda: events.append("close"))
+        def acquire(sql, values=None):
+            self.assertEqual(sql, "SELECT pg_advisory_xact_lock(%s)")
+            self.assertEqual(values, (M._SCHEMA_LOCK_KEY,))
+            locked["active"] = True
+            events.append("lock")
+        def pooled_execute(sql, values=None):
+            self.assertTrue(locked["active"], "Every DDL statement must be inside the schema lock lifetime")
+            events.append("ddl")
+        def pooled_commit():
+            self.assertTrue(locked["active"], "Helper commits must not release the dedicated lock transaction")
+            events.append("helper-commit")
+        def optional_seed():
+            self.assertTrue(locked["active"])
+            events.append("optional-seed")
+        def finish():
+            self.assertTrue(locked["active"])
+            self.assertEqual(events[-1], "optional-seed")
+            locked["active"] = False
+            events.append("commit")
+        guard.cur.execute = acquire
+        guard.commit = unittest.mock.Mock(side_effect=finish)
+        guard.rollback = unittest.mock.Mock()
+        pooled.cur.execute, pooled.commit = pooled_execute, pooled_commit
+        with patch.object(M, "DATABASE_URL", "postgresql://localhost/disposable"), patch.object(M.psycopg2, "connect", return_value=guard) as connect, patch.object(M, "_pg_conn", return_value=pooled), patch.object(M._installation, "env_bool", return_value=True), patch.object(M, "_seed_korean_holidays", side_effect=optional_seed):
+            M.initialize_schema()
+        connect.assert_called_once_with("postgresql://localhost/disposable", **M._PG_CONN_KWARGS)
+        self.assertFalse(guard.autocommit)
+        self.assertNotIn(M._SCHEMA_LOCK_KEY, (M._LEADER_LOCK_KEY, M._REPORT_LOCK_KEY))
+        self.assertGreater(events.count("ddl"), 20)
+        self.assertEqual(events[0], "lock")
+        self.assertEqual(events[-3:], ["optional-seed", "commit", "close"])
+        self.assertFalse(locked["active"])
+        guard.commit.assert_called_once()
+        guard.rollback.assert_not_called()
+        guard.close.assert_called_once()
+
+    def test_schema_lock_rolls_back_and_closes_when_a_helper_fails(self):
+        events, locked = [], {"active": False}
+        guard = Connection()
+        def acquire(sql, values=None):
+            locked["active"] = True
+            events.append("lock")
+        def failure():
+            self.assertTrue(locked["active"])
+            events.append("helper-failure")
+            raise RuntimeError("synthetic schema failure")
+        def rollback():
+            self.assertTrue(locked["active"])
+            locked["active"] = False
+            events.append("rollback")
+        guard.cur.execute = acquire
+        guard.commit = unittest.mock.Mock()
+        guard.rollback = unittest.mock.Mock(side_effect=rollback)
+        guard.close = unittest.mock.Mock(side_effect=lambda: events.append("close"))
+        with patch.object(M, "DATABASE_URL", "postgresql://localhost/disposable"), patch.object(M.psycopg2, "connect", return_value=guard), patch.object(M, "_pg_conn", return_value=Connection()), patch.object(M, "_ensure_core_tree_table", side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, "synthetic schema failure"):
+                M.initialize_schema()
+        self.assertEqual(events, ["lock", "helper-failure", "rollback", "close"])
+        self.assertFalse(locked["active"])
+        guard.commit.assert_not_called()
+        guard.rollback.assert_called_once()
+        guard.close.assert_called_once()
 
     def test_table_column_upgrades_are_idempotent_without_discarding_fresh_tables(self):
         for initialize in (M._ensure_core_tree_table, M._ensure_member_reports_table):

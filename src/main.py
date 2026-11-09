@@ -233,6 +233,7 @@ def _pg_conn():
 # advisory lock 키 — 워커 간 조정용 (서로 다른 키라 독립적으로 동작)
 _LEADER_LOCK_KEY = 912771   # 백그라운드 작업 담당 워커 선출
 _REPORT_LOCK_KEY = 912772   # 리포트 저장 직렬화
+_SCHEMA_LOCK_KEY = 912773   # Serialize schema initialization across workers and bootstrap processes
 _leader_conn = None         # 리더 락 유지용 장수명 커넥션 (GC 방지)
 _IS_LEADER = False          # 이 워커가 백그라운드 작업 담당(리더)인지 — 스케줄러 게이팅용
 
@@ -3260,33 +3261,46 @@ async def _leader_election_loop() -> None:
 
 
 def initialize_schema():
-    """Initialize local schema without seeding users or importing/deleting stored records."""
+    """Initialize local schema under a cross-process, transaction-scoped advisory lock."""
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is required")
-    conn = _pg_conn()
+    # Keep the lock in its own transaction: helpers commit on separate pooled connections.
+    # A transaction pooler pins this dedicated connection's backend until commit/rollback.
+    schema_connection = psycopg2.connect(DATABASE_URL, **_PG_CONN_KWARGS)
     try:
-        cur = conn.cursor()
-        cur.execute("CREATE TABLE IF NOT EXISTS ext_app_store (key TEXT PRIMARY KEY, data JSONB, updated_at TIMESTAMP DEFAULT NOW())")
-        conn.commit()
+        schema_connection.autocommit = False
+        with schema_connection.cursor() as schema_cursor:
+            schema_cursor.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
+        conn = _pg_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE IF NOT EXISTS ext_app_store (key TEXT PRIMARY KEY, data JSONB, updated_at TIMESTAMP DEFAULT NOW())")
+            conn.commit()
+        finally:
+            conn.close()
+        _init_users_table()
+        _ensure_bootstrap_tables()
+        _ensure_leave_columns()
+        _ensure_exec_table()
+        _ensure_core_tree_table()
+        _ensure_approvals_table()
+        _ensure_activity_logs_table()
+        _ensure_notifications_table()
+        _ensure_member_reports_table()
+        _ensure_project_hierarchy_table()
+        _ensure_memos_table()
+        _init_backups_table()
+        _ensure_settings_extra_tables()
+        _ensure_linear_cache_table()
+        _ensure_upsert_indexes()
+        if _installation.env_bool("SEED_KOREAN_HOLIDAYS"):
+            _seed_korean_holidays()
+        schema_connection.commit()
+    except BaseException:
+        schema_connection.rollback()
+        raise
     finally:
-        conn.close()
-    _init_users_table()
-    _ensure_bootstrap_tables()
-    _ensure_leave_columns()
-    _ensure_exec_table()
-    _ensure_core_tree_table()
-    _ensure_approvals_table()
-    _ensure_activity_logs_table()
-    _ensure_notifications_table()
-    _ensure_member_reports_table()
-    _ensure_project_hierarchy_table()
-    _ensure_memos_table()
-    _init_backups_table()
-    _ensure_settings_extra_tables()
-    _ensure_linear_cache_table()
-    _ensure_upsert_indexes()
-    if _installation.env_bool("SEED_KOREAN_HOLIDAYS"):
-        _seed_korean_holidays()
+        schema_connection.close()
 
 
 @app.on_event("startup")
