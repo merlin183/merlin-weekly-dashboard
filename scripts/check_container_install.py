@@ -22,9 +22,9 @@ def main():
     password=secrets.token_urlsafe(32)
     print('::add-mask::'+password)
     args=['docker','compose','--profile','tools','run','--rm','-T','bootstrap','--name','CI Administrator','--email','admin@example.test','--password-stdin']
-    first=subprocess.run(args,cwd=ROOT,input=(password+'\n').encode(),capture_output=True)
+    first=subprocess.run(args,cwd=ROOT,input=(password+'\n').encode(),capture_output=True,timeout=90)
     if first.returncode!=0: raise SystemExit('Initial administrator command failed inside the container.')
-    again=subprocess.run(args,cwd=ROOT,input=(password+'\n').encode(),capture_output=True)
+    again=subprocess.run(args,cwd=ROOT,input=(password+'\n').encode(),capture_output=True,timeout=90)
     if again.returncode==0 or b'Bootstrap refused: this installation already has users' not in again.stderr:
         raise SystemExit('Existing installation did not explicitly refuse repeated bootstrap.')
     body=json.dumps({'email':'admin@example.test','password':password}).encode()

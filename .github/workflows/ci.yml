@@ -108,11 +108,24 @@ jobs:
         with:
           python-version: "3.12"
       - name: Generate fresh local environment without printing credentials
-        run: python scripts/setup_env.py
+        run: |
+          python scripts/setup_env.py
+          python - <<'PY'
+          from pathlib import Path
+          for line in Path('.env').read_text().splitlines():
+              name, _, value = line.partition('=')
+              if name in {'POSTGRES_PASSWORD', 'JWT_SECRET', 'DATABASE_URL'} and value:
+                  print('::add-mask::' + value)
+          PY
       - name: Build and start a new Compose installation
         run: docker compose up --build -d db app
       - name: Verify first administrator and authentication inside the real image
         run: python scripts/check_container_install.py
+      - name: Show isolated startup diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail 120 app db
       - name: Remove only this disposable CI project
         if: always()
         run: docker compose down --volumes --remove-orphans
