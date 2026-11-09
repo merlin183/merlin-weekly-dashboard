@@ -6,8 +6,24 @@ def module(name,path):
     spec=importlib.util.spec_from_file_location(name,ROOT/path);result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
 gate=module('release_gate','scripts/check_release.py')
 setup=module('environment_setup','scripts/setup_env.py')
+container_check=module('container_install_check','scripts/check_container_install.py')
 
 class PublicReleaseTests(unittest.TestCase):
+    def test_container_readiness_retries_transient_startup_resets(self):
+        import http.client,io
+        from unittest.mock import Mock
+        client=Mock()
+        client.open.side_effect=[ConnectionResetError(),http.client.RemoteDisconnected(),io.BytesIO(b'{'),io.BytesIO(b'{"ok":true}')]
+        pause=Mock()
+        container_check.wait_for_health(client,attempts=4,pause=pause)
+        self.assertEqual(client.open.call_count,4)
+        self.assertEqual(pause.call_count,3)
+    def test_container_readiness_never_accepts_an_unhealthy_install(self):
+        from unittest.mock import Mock
+        client=Mock()
+        client.open.side_effect=ConnectionRefusedError()
+        with self.assertRaises(SystemExit): container_check.wait_for_health(client,attempts=2,pause=Mock())
+        self.assertEqual(client.open.call_count,2)
     def test_environment_generation_is_private_and_never_overwrites(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'.env.example').write_bytes((ROOT/'.env.example').read_bytes())
