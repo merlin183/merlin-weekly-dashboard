@@ -1,0 +1,245 @@
+    <template x-if="activeTab === 'expenses'">
+    <section x-transition class="space-y-4"
+             x-init="if (!expenseLoaded) { expenseViewMode = 'month'; expenseFilterYear = String(new Date().getFullYear()); expenseFilterMonth = String(new Date().getMonth() + 1); loadExpenses(); }">
+
+      <div class="bg-white border border-slate-200 rounded-2xl p-5">
+        <!-- 헤더 -->
+        <div class="flex items-center gap-3 mb-4">
+          <span class="text-xs font-bold text-green-600 uppercase tracking-widest">EXP</span>
+          <h2 class="text-sm font-semibold text-slate-700">비용 관리</h2>
+
+          <!-- 월별 / 연도별 / 전체 토글 -->
+          <div class="flex bg-slate-100 rounded-lg p-0.5 ml-2">
+            <button @click="setExpenseView('month')"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="expenseViewMode === 'month' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">월별</button>
+            <button @click="setExpenseView('year')"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="expenseViewMode === 'year' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">연도별</button>
+            <button @click="setExpenseView('all')"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="expenseViewMode === 'all' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">전체</button>
+          </div>
+
+          <!-- 연도 선택 -->
+          <select x-show="expenseViewMode !== 'all'" x-model="expenseFilterYear" @change="loadExpenses()"
+                  class="text-[10px] px-2 py-1 rounded-lg border border-slate-200 outline-none bg-white ml-1">
+            <option value="2026">2026</option>
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+            <option value="2023">2023</option>
+            <option value="2022">2022</option>
+            <option value="2021">2021</option>
+          </select>
+
+          <!-- 월 선택 -->
+          <select x-show="expenseViewMode === 'month'" x-model="expenseFilterMonth" @change="loadExpenses()"
+                  class="text-[10px] px-2 py-1 rounded-lg border border-slate-200 outline-none bg-white">
+            <option value="1">1월</option>
+            <option value="2">2월</option>
+            <option value="3">3월</option>
+            <option value="4">4월</option>
+            <option value="5">5월</option>
+            <option value="6">6월</option>
+            <option value="7">7월</option>
+            <option value="8">8월</option>
+            <option value="9">9월</option>
+            <option value="10">10월</option>
+            <option value="11">11월</option>
+            <option value="12">12월</option>
+          </select>
+
+          <button @click="loadExpenses()" :disabled="expenseLoading"
+                  class="text-[10px] px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition ml-1"
+                  x-text="expenseLoading ? '로딩...' : '↻ 새로고침'"></button>
+
+          <!-- 합계 -->
+          <div class="ml-auto flex items-center gap-3">
+            <span class="text-[10px] text-slate-400" x-text="expenseCount + '건'"></span>
+            <span class="text-sm font-bold text-green-700" x-text="formatKRW(expenseTotal)"></span>
+          </div>
+        </div>
+
+        <!-- 추가 버튼 — 공용(legacy) 세션은 숨김 (백엔드도 403 차단) -->
+        <div x-show="!isLegacy()" class="flex items-center gap-2 mb-4">
+          <button @click="expenseForm.show = !expenseForm.show"
+                  class="px-3 py-1.5 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium">
+            + 비용 추가
+          </button>
+        </div>
+
+        <!-- 추가 폼 -->
+        <div x-show="expenseForm.show" x-transition class="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl space-y-3">
+          <div class="grid grid-cols-4 gap-3">
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">입력날짜</label>
+              <input x-model="expenseForm.date" :placeholder="(new Date().getMonth()+1) + '/' + new Date().getDate()"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">담당자</label>
+              <select x-model="expenseForm.manager" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400 bg-white">
+                <option value="">선택</option>
+                <template x-for="m in visibleMembers" :key="'exp-m-' + m">
+                  <option :value="m" x-text="m"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">출금 회사명</label>
+              <input x-model="expenseForm.company" placeholder="예: SBM에이전시"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">내용 <span class="text-red-500">*</span></label>
+              <input x-model="expenseForm.description" placeholder="예: 광고비 충전"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+          </div>
+          <div class="grid grid-cols-5 gap-3">
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">은행명</label>
+              <input x-model="expenseForm.bank" placeholder="예: 카카오"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+              <p class="text-[9px] text-amber-500 mt-0.5">카드결제시 은행명에 '카드결제'라고만 작성</p>
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">계좌번호</label>
+              <input x-model="expenseForm.account" placeholder="계좌번호"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">금액 <span class="text-red-500">*</span></label>
+              <input x-model="expenseForm.amount" placeholder="예: 100,000"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">예금주</label>
+              <input x-model="expenseForm.depositor" placeholder="예금주"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">기타문의</label>
+              <input x-model="expenseForm.note" placeholder="메모"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-green-400">
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="addExpense()" :disabled="expenseSaving"
+                    class="px-4 py-1.5 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg transition font-medium"
+                    x-text="expenseSaving ? '저장 중...' : '추가'"></button>
+            <button @click="expenseForm.show = false" class="px-4 py-1.5 text-xs text-slate-500 hover:text-slate-700 transition">취소</button>
+            <span class="text-[10px] text-slate-400 ml-2">* 년도는 자동(올해), 상태는 추가 후 테이블에서 변경</span>
+          </div>
+        </div>
+
+        <!-- 테이블 -->
+        <div class="overflow-x-auto rounded-xl border border-slate-200">
+          <table class="w-full text-xs">
+            <thead class="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600 w-10">No</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600 w-16">날짜</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600 w-14">담당자</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600">회사명</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600">내용</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600 w-16">은행</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600 w-44 min-w-[11rem]">계좌번호</th>
+                <th class="px-3 py-2 text-right font-semibold text-slate-600 w-24">금액</th>
+                <th class="px-3 py-2 text-left font-semibold text-slate-600 w-16">예금주</th>
+                <th class="px-3 py-2 text-center font-semibold text-slate-600 w-20">상태</th>
+                <th class="px-3 py-2 text-center font-semibold text-slate-600 w-16">처리자</th>
+                <th class="px-2 py-2 text-center font-semibold text-slate-600 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="row in expenseRows" :key="'exp-' + row.no">
+                <tr class="border-b border-slate-50 hover:bg-slate-50 transition group">
+                  <td class="px-3 py-2 text-slate-400 tabular-nums" x-text="row.no"></td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-600 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5 tabular-nums"
+                           :value="row.date" @blur="if($event.target.value !== row.date) updateExpenseField(row, 'date', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-700 font-medium bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5"
+                           :value="row.manager" @blur="if($event.target.value !== row.manager) updateExpenseField(row, 'manager', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-600 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5"
+                           :value="row.company" @blur="if($event.target.value !== row.company) updateExpenseField(row, 'company', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-700 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5"
+                           :value="row.description" @blur="if($event.target.value !== row.description) updateExpenseField(row, 'description', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-500 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5"
+                           :value="row.bank" @blur="if($event.target.value !== row.bank) updateExpenseField(row, 'bank', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-[10px] text-slate-500 font-mono bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5 text-ellipsis"
+                           :value="row.account" :title="row.account"
+                           @blur="if($event.target.value !== row.account) updateExpenseField(row, 'account', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-800 font-medium text-right bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5 tabular-nums"
+                           :value="Number(String(row.amount).replace(/,/g,'')).toLocaleString('ko-KR')"
+                           @focus="$event.target.value = String(row.amount).replace(/,/g,'')"
+                           @blur="const v = $event.target.value.replace(/,/g,''); if(v !== String(row.amount).replace(/,/g,'')) updateExpenseField(row, 'amount', v); $event.target.value = Number(v).toLocaleString('ko-KR')">
+                  </td>
+                  <td class="px-3 py-2">
+                    <input class="w-full text-xs text-slate-500 bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-400 outline-none px-0 py-0.5"
+                           :value="row.depositor" @blur="if($event.target.value !== row.depositor) updateExpenseField(row, 'depositor', $event.target.value)">
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <select class="text-[10px] px-1 py-0.5 rounded-lg border font-medium outline-none cursor-pointer bg-white"
+                            :class="row.status === '이체완료' ? 'border-emerald-200 text-emerald-700' : row.status === '카드결제' ? 'border-blue-200 text-blue-700' : row.status === '결제완료' ? 'border-amber-200 text-amber-700' : 'border-slate-200 text-slate-500'"
+                            :value="row.status"
+                            @change="updateExpenseStatus(row, $event.target.value)">
+                      <option value="">미처리</option>
+                      <option value="이체완료">이체완료</option>
+                      <option value="결제완료">결제완료</option>
+                      <option value="카드결제">카드결제</option>
+                    </select>
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <select class="text-[10px] px-1 py-0.5 rounded-lg border border-slate-200 font-medium outline-none cursor-pointer bg-white text-slate-600"
+                            :value="row.manager2"
+                            x-init="$nextTick(() => { $el.value = row.manager2 || '' })"
+                            @change="updateExpenseField(row, 'manager2', $event.target.value)">
+                      <option value="">-</option>
+                      <template x-for="m in memberOptions(teamConfig.members, row.manager2)" :key="'exp-m2-' + row.no + '-' + m">
+                        <option :value="m" x-text="m"></option>
+                      </template>
+                    </select>
+                  </td>
+                  <td class="px-2 py-2 text-center">
+                    <button x-show="isAdmin() || isPm()" @click="deleteExpense(row)"
+                            class="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-500 text-xs font-bold transition opacity-0 group-hover:opacity-100"
+                            title="삭제">&times;</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+            <!-- 합계 행 -->
+            <tfoot class="bg-green-50 border-t-2 border-green-200">
+              <tr>
+                <td colspan="7" class="px-3 py-2.5 text-right font-bold text-slate-600">합계</td>
+                <td class="px-3 py-2.5 text-right font-bold text-green-700 tabular-nums" x-text="formatKRW(expenseTotal)"></td>
+                <td colspan="4" class="px-3 py-2.5 text-[10px] text-slate-400" x-text="expenseCount + '건'"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- 로딩 / 빈 상태 -->
+        <div x-show="expenseLoading" class="text-center py-12 text-slate-400">
+          <p class="text-sm">데이터 불러오는 중...</p>
+        </div>
+        <div x-show="!expenseLoading && expenseRows.length === 0 && expenseLoaded" class="text-center py-12 text-slate-400">
+          <p class="text-sm" x-text="expenseViewMode === 'month' ? expenseFilterYear + '년 ' + expenseFilterMonth + '월 비용 데이터가 없습니다' : expenseViewMode === 'year' ? expenseFilterYear + '년 비용 데이터가 없습니다' : '비용 데이터가 없습니다'"></p>
+          <button x-show="expenseViewMode === 'month'" @click="setExpenseView('year')" class="mt-2 text-xs text-blue-500 hover:text-blue-700">연도별 보기</button>
+        </div>
+      </div>
+    </section>
+    </template>

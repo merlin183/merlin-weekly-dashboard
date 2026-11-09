@@ -1,0 +1,18 @@
+# 컨테이너 이미지에는 src/ static/ requirements.txt 만 필요 — 비밀값·로컬 데이터 제외
+.git
+.github
+.claude
+.env
+.env.*
+*.secret.md
+gcp-sa-key.json
+data
+node_modules
+cf
+tailwind
+tests
+docs
+scripts/*
+!scripts/bootstrap_admin.py
+__pycache__
+**/__pycache__

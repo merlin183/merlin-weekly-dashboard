@@ -1,0 +1,569 @@
+    <template x-if="activeTab === 'notes'">
+    <section x-transition
+             x-init="if (!notesLoaded) loadNotes(); if (!notesCalEvents.length) loadNotesCalendar(); if (!sharedMemosLoaded) loadSharedMemos();">
+
+      <!-- ══════════════════════════════ -->
+      <!-- 월간 캘린더                      -->
+      <!-- ══════════════════════════════ -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 mb-4" x-data="{
+        calMonth: new Date().getMonth(),
+        calYear: new Date().getFullYear(),
+        calSelected: null,
+        calFilterPerson: '',
+        calAllEvents: {},  // { 'YYYY-MM': [events] } 월별 캐시
+        calEventsLoading: false,
+        async loadCalMonth(year, month) {
+          const key = year + '-' + String(month + 1).padStart(2, '0');
+          if (this.calAllEvents[key]) return; // 이미 로드됨
+          this.calEventsLoading = true;
+          try {
+            const start = key + '-01';
+            const lastDay = new Date(year, month + 1, 0).getDate();
+            const end = key + '-' + String(lastDay).padStart(2, '0');
+            const res = await _authFetch(location.origin + '/api/calendar/events?start=' + start + '&end=' + end);
+            if (res.ok) {
+              const d = await res.json();
+              this.calAllEvents[key] = d.events || [];
+              // notesCalEvents에도 병합 (필터용)
+              const existing = new Set((notesCalEvents || []).map(e => e.id));
+              (d.events || []).forEach(e => { if (!existing.has(e.id)) notesCalEvents.push(e); });
+            }
+          } catch {} finally { this.calEventsLoading = false; }
+        },
+        get calMonthName() { return this.calYear + '년 ' + (this.calMonth + 1) + '월'; },
+        get calDays() {
+          const first = new Date(this.calYear, this.calMonth, 1);
+          const last = new Date(this.calYear, this.calMonth + 1, 0);
+          const startDay = first.getDay();
+          const days = [];
+          for (let i = 0; i < startDay; i++) days.push({ day: '', date: '' });
+          for (let d = 1; d <= last.getDate(); d++) {
+            const mm = String(this.calMonth + 1).padStart(2, '0');
+            const dd = String(d).padStart(2, '0');
+            days.push({ day: d, date: this.calYear + '-' + mm + '-' + dd });
+          }
+          return days;
+        },
+        get allCalPersons() {
+          const names = new Set();
+          (notesCalEvents || []).forEach(e => {
+            (e.attendees || []).forEach(a => names.add(a));
+            if (e.creator) names.add(e.creator);
+          });
+          return [...names].sort();
+        },
+        filteredEvents(date) {
+          if (!date) return [];
+          let events = (notesCalEvents || []).filter(e => e.startDate === date);
+          if (this.calFilterPerson) {
+            events = events.filter(e =>
+              (e.attendees || []).some(a => a === this.calFilterPerson) ||
+              e.creator === this.calFilterPerson ||
+              (e.title || '').includes(this.calFilterPerson)
+            );
+          }
+          // 공휴일 자동 prepend — 부모 dashboard()의 holidaysMap 직접 참조 (reactivity 보장)
+          const root = this.$root || this;
+          const hm = root.holidaysMap || {};
+          const hn = hm[date] || '';
+          if (hn) {
+            events = [{ id: 'holiday-' + date, title: '🇰🇷 ' + hn, startDate: date, isHoliday: true, allDay: true, attendees: [] }, ...events];
+          }
+          return events;
+        },
+        eventsForDate(date) { return this.filteredEvents(date); },
+        prevMonth() { if (this.calMonth === 0) { this.calMonth = 11; this.calYear--; } else { this.calMonth--; } this.loadCalMonth(this.calYear, this.calMonth); },
+        nextMonth() { if (this.calMonth === 11) { this.calMonth = 0; this.calYear++; } else { this.calMonth++; } this.loadCalMonth(this.calYear, this.calMonth); },
+        isToday(date) { return date === new Date().toISOString().slice(0, 10); },
+      }" x-init="loadCalMonth(calYear, calMonth); setInterval(() => { delete calAllEvents[calYear + '-' + String(calMonth+1).padStart(2,'0')]; loadCalMonth(calYear, calMonth); loadNotesCalendar(); }, 300000)">
+        <div class="flex items-center gap-3 mb-4">
+          <span class="text-xs font-bold text-indigo-600 uppercase tracking-widest">CALENDAR</span>
+          <button @click="prevMonth()" class="text-slate-400 hover:text-slate-700 text-sm px-2">◀</button>
+          <h2 class="text-sm font-semibold text-slate-700" x-text="calMonthName"></h2>
+          <button @click="nextMonth()" class="text-slate-400 hover:text-slate-700 text-sm px-2">▶</button>
+          <button @click="calMonth = new Date().getMonth(); calYear = new Date().getFullYear()"
+                  class="text-[10px] px-2 py-0.5 border border-slate-200 text-slate-500 rounded hover:bg-slate-50">오늘</button>
+          <!-- 담당자 필터 -->
+          <select x-model="calFilterPerson" class="text-[10px] px-2 py-1 border border-slate-200 rounded outline-none bg-white ml-auto">
+            <option value="">전체 담당자</option>
+            <template x-for="p in visibleProfiles(allCalPersons)" :key="'calf-' + p">
+              <option :value="p" x-text="p"></option>
+            </template>
+          </select>
+          <span x-show="calEventsLoading" class="text-[10px] text-slate-400">로딩...</span>
+          <button @click="delete calAllEvents[calYear + '-' + String(calMonth+1).padStart(2,'0')]; loadCalMonth(calYear, calMonth); loadNotesCalendar()" class="text-[10px] px-2 py-0.5 border border-indigo-200 text-indigo-500 rounded hover:bg-indigo-50">🔄 동기화</button>
+        </div>
+        <!-- 요일 헤더 (월요일 시작) -->
+        <div class="grid grid-cols-7 gap-1 mb-1 text-[11px] font-bold text-center">
+          <div class="text-red-500 py-1">일</div>
+          <div class="text-slate-500 py-1">월</div>
+          <div class="text-slate-500 py-1">화</div>
+          <div class="text-slate-500 py-1">수</div>
+          <div class="text-slate-500 py-1">목</div>
+          <div class="text-slate-500 py-1">금</div>
+          <div class="text-blue-500 py-1">토</div>
+        </div>
+        <!-- 날짜 그리드 (근태/연차 캘린더와 동일 패턴, calMoreDate: '+N more' 클릭 시 해당 날짜 전체 일정 팝업) -->
+        <div x-data="{ calMoreDate: '' }" @keydown.escape.window="calMoreDate = ''">
+        <div class="grid grid-cols-7 gap-1">
+          <template x-for="(cell, cIdx) in calDays" :key="'cal-' + cIdx">
+            <div class="min-h-[120px] p-1.5 rounded-lg border text-xs cursor-pointer transition"
+                 :class="[
+                   isHoliday(cell.date) ? 'bg-red-50' : (cell.date ? 'bg-white' : 'bg-slate-50'),
+                   isToday(cell.date) ? 'border-indigo-500 ring-1 ring-indigo-200' : (isHoliday(cell.date) ? 'border-red-200 hover:border-red-300' : (calSelected === cell.date ? 'border-indigo-400 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-indigo-300')),
+                 ]"
+                 @click="cell.date && (calSelected = calSelected === cell.date ? null : cell.date)">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[11px] font-bold" x-show="cell.day"
+                      :class="isToday(cell.date) ? 'text-indigo-700' :
+                              (isHoliday(cell.date) || cIdx % 7 === 0) ? 'text-red-500' :
+                              cIdx % 7 === 6 ? 'text-blue-500' : 'text-slate-700'"
+                      x-text="cell.day"></span>
+              </div>
+              <div class="space-y-0.5">
+                <template x-for="ev in eventsForDate(cell.date).slice(0, 4)" :key="'cev-' + ev.id">
+                  <div class="px-1.5 py-0.5 rounded text-[10px] font-medium truncate"
+                       :class="ev.isHoliday ? 'bg-red-100 text-red-700' :
+                               (ev.title && (ev.title.includes('연차') || ev.title.includes('반차') || ev.title.includes('공가') || ev.title.includes('경조') || ev.title.includes('무급'))) ? 'bg-violet-100 text-violet-700' : 'bg-indigo-100 text-indigo-700'"
+                       :title="ev.title + (ev.startTime ? ' (' + ev.startTime + ')' : '')">
+                    <span x-show="ev.startTime" class="text-[9px] opacity-70 mr-0.5" x-text="ev.startTime"></span>
+                    <span x-text="ev.title"></span>
+                  </div>
+                </template>
+                <div x-show="eventsForDate(cell.date).length > 4"
+                     class="text-[9px] text-slate-400 hover:text-slate-600 px-1 cursor-pointer"
+                     @click.stop="calMoreDate = cell.date"
+                     x-text="'+' + (eventsForDate(cell.date).length - 4) + ' more'"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 날짜별 전체 일정 팝업 -->
+        <div x-show="calMoreDate" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="calMoreDate = ''" style="display:none">
+          <div class="bg-white rounded-2xl shadow-xl w-[480px] max-h-[90vh] overflow-hidden flex flex-col" @click.stop>
+            <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 class="text-sm font-bold text-slate-800"
+                  x-text="calMoreDate ? (Number(calMoreDate.slice(5,7)) + '월 ' + Number(calMoreDate.slice(8,10)) + '일 일정 (' + eventsForDate(calMoreDate).length + '건)') : ''"></h3>
+              <button @click="calMoreDate = ''" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+            </div>
+            <div class="p-5 space-y-1.5 overflow-y-auto">
+              <template x-for="ev in (calMoreDate ? eventsForDate(calMoreDate) : [])" :key="'cmore-' + ev.id">
+                <div class="px-2.5 py-1.5 rounded-lg text-xs font-medium"
+                     :class="ev.isHoliday ? 'bg-red-100 text-red-700' :
+                             (ev.title && (ev.title.includes('연차') || ev.title.includes('반차') || ev.title.includes('공가') || ev.title.includes('경조') || ev.title.includes('무급'))) ? 'bg-violet-100 text-violet-700' : 'bg-indigo-100 text-indigo-700'">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] opacity-70 font-mono w-24 shrink-0" x-text="ev.startTime ? (ev.startTime + (ev.endTime ? ' ~ ' + ev.endTime : '')) : '종일'"></span>
+                    <span class="flex-1 min-w-0 truncate" x-text="ev.title"></span>
+                    <button x-show="!ev.isHoliday" @click="calMoreDate = ''; openNoteFromCalEvent(ev)" class="text-[10px] px-2 py-0.5 bg-white text-teal-600 rounded border border-teal-200 hover:bg-teal-100 shrink-0">📝 회의록</button>
+                    <button x-show="!ev.isHoliday" @click="deleteCalEvent(ev.id)" class="text-slate-400 hover:text-red-500 text-sm leading-none px-1 shrink-0">×</button>
+                  </div>
+                  <div x-show="(ev.attendees || []).length > 0" class="mt-1 flex flex-wrap items-center gap-1">
+                    <span class="text-[9px] opacity-70">참석자:</span>
+                    <template x-for="att in (ev.attendees || [])" :key="'cmatt-' + ev.id + '-' + att">
+                      <span class="text-[9px] px-1.5 py-0.5 bg-white rounded" x-text="att"></span>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <div x-show="calMoreDate && eventsForDate(calMoreDate).length === 0" class="text-center text-xs text-slate-400 py-4">일정이 없습니다.</div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <!-- 선택된 날짜 일정 상세 -->
+        <div x-show="calSelected" x-transition class="mt-3 p-3 bg-indigo-50/50 rounded-xl">
+          <p class="text-xs font-bold text-indigo-700 mb-2" x-text="calSelected + ' 일정 (' + eventsForDate(calSelected).length + '건)'"></p>
+          <div x-show="eventsForDate(calSelected).length > 0" class="space-y-1.5">
+            <template x-for="ev in eventsForDate(calSelected)" :key="'csel-' + ev.id">
+              <div class="bg-white rounded-lg px-3 py-2 border border-indigo-100">
+                <div class="flex items-center gap-2">
+                  <span x-show="ev.startTime" class="text-[10px] text-indigo-500 font-mono w-24 shrink-0" x-text="ev.startTime + (ev.endTime ? ' ~ ' + ev.endTime : '')"></span>
+                  <span x-show="!ev.startTime" class="text-[10px] text-slate-400 w-24 shrink-0">종일</span>
+                  <span class="text-xs text-slate-700 font-medium flex-1" x-text="ev.title"></span>
+                  <button @click="openNoteFromCalEvent(ev)" class="text-[10px] px-2 py-0.5 bg-teal-50 text-teal-600 rounded border border-teal-200 hover:bg-teal-100 shrink-0">📝 회의록 작성</button>
+                  <button @click="deleteCalEvent(ev.id)" class="text-[10px] px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded border border-red-200 shrink-0">삭제</button>
+                </div>
+                <div x-show="(ev.attendees || []).length > 0" class="mt-1 flex items-center gap-1">
+                  <span class="text-[9px] text-slate-400">참석자:</span>
+                  <template x-for="att in (ev.attendees || [])" :key="'catt-' + att">
+                    <span class="text-[9px] px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded" x-text="att"></span>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div x-show="eventsForDate(calSelected).length === 0" class="text-center py-3 text-xs text-slate-400">이 날짜에 일정이 없습니다</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- 왼쪽: 회의록 (2/3) -->
+      <div class="lg:col-span-2 space-y-4">
+      <div class="bg-white border border-slate-200 rounded-2xl p-5">
+        <!-- 헤더 -->
+        <div class="flex items-center gap-3 mb-4">
+          <span class="text-xs font-bold text-teal-600 uppercase tracking-widest">NOTE</span>
+          <h2 class="text-sm font-semibold text-slate-700">회의록</h2>
+
+          <!-- 종류 필터 -->
+          <div class="flex bg-slate-100 rounded-lg p-0.5 ml-2">
+            <button @click="notesFilterType = ''; loadNotes()"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="!notesFilterType ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">전체</button>
+            <button @click="notesFilterType = '주간회의'; loadNotes()"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="notesFilterType === '주간회의' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">주간회의</button>
+            <button @click="notesFilterType = '일일회의'; loadNotes()"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="notesFilterType === '일일회의' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">일일회의</button>
+            <button @click="notesFilterType = '기타'; loadNotes()"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="notesFilterType === '기타' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">기타</button>
+          </div>
+
+          <div class="ml-auto flex items-center gap-2">
+            <button @click="notesRecorderOpen = !notesRecorderOpen"
+                    class="px-3 py-1.5 text-xs rounded-lg transition font-medium border"
+                    :class="notesRecorderOpen ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+              <span x-text="notesRecorderOpen ? '🎙️ 녹음 닫기' : '🎙️ 녹음'"></span>
+            </button>
+            <button @click="openCalEventModal()"
+                    class="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition font-medium">
+              📅 회의 일정 추가
+            </button>
+            <button @click="openNoteForm(null)"
+                    class="px-3 py-1.5 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition font-medium">
+              + 회의록 작성
+            </button>
+          </div>
+        </div>
+
+        <!-- 녹음 사이트 iframe (토글, lazy load) -->
+        <div x-show="notesRecorderOpen" x-transition class="mb-4 border border-red-200 rounded-xl overflow-hidden">
+          <div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200">
+            <span class="text-xs font-bold text-red-600">🎙️ 회의 녹음</span>
+            <span class="text-[10px] text-red-400">사내 네트워크에서만 접근 가능</span>
+          </div>
+          <iframe :src="notesRecorderOpen ? (teamConfig.recorderUrl || '') : ''" class="w-full border-0" style="height: 400px;"></iframe>
+        </div>
+
+        <!-- 오늘 회의 일정 (구글 캘린더) -->
+        <div class="mb-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl" x-data="{
+          get todayStr() { return new Date().toISOString().slice(0, 10); },
+          get todayEvents() { return (notesCalEvents || []).filter(e => e.startDate === this.todayStr); },
+        }">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-[10px] font-bold text-indigo-600 uppercase">📅 오늘 회의</span>
+            <span class="text-[10px] text-indigo-400" x-text="todayStr + ' · ' + todayEvents.length + '건'"></span>
+            <button @click="loadNotesCalendar()" class="text-[10px] text-indigo-400 hover:text-indigo-600 ml-auto">🔄</button>
+          </div>
+          <div x-show="notesCalLoading" class="text-[10px] text-slate-400 py-2">로딩 중...</div>
+          <div x-show="!notesCalLoading && todayEvents.length === 0" class="text-[10px] text-slate-400 py-2">오늘 예정된 회의가 없습니다</div>
+          <div x-show="!notesCalLoading" class="space-y-1">
+            <template x-for="ev in todayEvents" :key="'ncal-' + ev.id">
+              <div class="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-indigo-100 hover:border-indigo-300 transition group">
+                <span x-show="ev.startTime" class="text-[10px] text-indigo-500 font-mono w-24 shrink-0" x-text="ev.startTime + (ev.endTime ? ' ~ ' + ev.endTime : '')"></span>
+                <span x-show="!ev.startTime" class="text-[10px] text-slate-400 w-24 shrink-0">종일</span>
+                <span class="text-xs text-slate-700 font-medium flex-1" x-text="ev.title"></span>
+                <span x-show="(ev.attendees || []).length > 0" class="text-[10px] text-slate-400 shrink-0" x-text="(ev.attendees || []).join(', ')"></span>
+                <button @click="openNoteFromCalEvent(ev)" class="text-[10px] px-2 py-0.5 bg-teal-50 text-teal-600 rounded border border-teal-200 hover:bg-teal-100 opacity-0 group-hover:opacity-100 transition">
+                  📝 회의록 작성
+                </button>
+                <button @click="deleteCalEvent(ev.id)" class="text-[10px] px-1.5 py-0.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition">
+                  &times;
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 회의 일정 추가 모달 -->
+        <div x-show="calEventModal.show" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="calEventModal.show = false">
+          <div class="bg-white rounded-2xl shadow-xl w-[480px]" @click.stop>
+            <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 class="text-sm font-bold text-slate-800">📅 회의 일정 추가</h3>
+              <button @click="calEventModal.show = false" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+            </div>
+            <div class="p-5 space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">일정 제목 *</label>
+                <input x-model="calEventModal.title" type="text" placeholder="예: 4월 3주차 주간회의"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">날짜 *</label>
+                <input x-model="calEventModal.date" type="date"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400">
+              </div>
+              <div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" x-model="calEventModal.all_day" class="rounded border-slate-300 text-indigo-600">
+                  <span class="text-xs text-slate-600">종일 일정</span>
+                </label>
+              </div>
+              <div x-show="!calEventModal.all_day" class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-500 mb-1">시작 시간</label>
+                  <input x-model="calEventModal.start_time" type="time"
+                         class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400">
+                </div>
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-500 mb-1">종료 시간</label>
+                  <input x-model="calEventModal.end_time" type="time"
+                         class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400">
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">참석자</label>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="m in visibleMembers" :key="'calatt-' + m">
+                    <button @click="toggleCalAttendee(m)" type="button"
+                            class="text-[10px] px-2 py-1 rounded-lg border transition font-medium"
+                            :class="calEventModal.attendees.includes(m) ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'"
+                            x-text="m"></button>
+                  </template>
+                </div>
+                <p x-show="calEventModal.attendees.length > 0" class="text-[10px] text-indigo-500 mt-1" x-text="calEventModal.attendees.length + '명 선택'"></p>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">메모 (선택)</label>
+                <textarea x-model="calEventModal.description" rows="2" placeholder="회의 안건 등"
+                          class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 resize-none"></textarea>
+              </div>
+            </div>
+            <div class="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+              <button @click="calEventModal.show = false" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">취소</button>
+              <button @click="submitCalEvent()" :disabled="calEventSaving"
+                      class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium"
+                      :class="calEventSaving ? 'opacity-50' : ''">
+                <span x-text="calEventSaving ? '등록 중...' : '캘린더에 등록'"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 작성/수정 폼 -->
+        <div x-show="notesForm.show" x-transition class="mb-4 p-4 bg-teal-50 border border-teal-200 rounded-xl space-y-3">
+          <div class="grid grid-cols-4 gap-3">
+            <div class="col-span-2">
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">제목 <span class="text-red-500">*</span></label>
+              <input x-model="notesForm.title" placeholder="예: 4월 2주차 주간회의"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-teal-400">
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">종류</label>
+              <select x-model="notesForm.meeting_type" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none bg-white">
+                <option value="주간회의">주간회의</option>
+                <option value="일일회의">일일회의</option>
+                <option value="기타">기타</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">주차</label>
+              <input x-model="notesForm.week_label" placeholder="예: 4월 2주차"
+                     class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-teal-400">
+            </div>
+          </div>
+          <div class="grid grid-cols-4 gap-3">
+            <div>
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">작성자</label>
+              <select x-model="notesForm.author" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none bg-white">
+                <option value="">선택</option>
+                <template x-for="m in visibleMembers" :key="'note-a-' + m"><option :value="m" x-text="m"></option></template>
+              </select>
+            </div>
+            <div class="col-span-3">
+              <label class="block text-[10px] font-medium text-slate-500 mb-1">파일 첨부</label>
+              <div class="flex items-center gap-2">
+                <label class="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition"
+                       :class="notesUploading ? 'opacity-50' : ''">
+                  <span x-text="notesUploading ? '업로드 중...' : '📎 파일 선택'"></span>
+                  <input type="file" class="hidden" @change="uploadNoteFile($event)" :disabled="notesUploading"
+                         accept=".md,.txt,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.hwp,.png,.jpg,.jpeg,.gif,.webp,.zip,.rar,.html,.csv">
+                </label>
+                <span class="text-[10px] text-slate-400" x-text="notesForm.attachments.length + '개 첨부'"></span>
+              </div>
+              <!-- 첨부 파일 목록 -->
+              <div x-show="notesForm.attachments.length > 0" class="flex flex-wrap gap-2 mt-2">
+                <template x-for="(att, aIdx) in notesForm.attachments" :key="'na-' + aIdx">
+                  <span class="inline-flex items-center gap-1 px-2 py-1 text-[10px] bg-white border border-slate-200 rounded-lg">
+                    <span x-text="att.isImage ? '🖼️' : '📄'"></span>
+                    <a :href="att.url" target="_blank" class="text-blue-600 hover:underline truncate max-w-[120px]" x-text="att.name"></a>
+                    <button @click="removeNoteAttachment(aIdx)" class="text-slate-300 hover:text-red-500">&times;</button>
+                  </span>
+                </template>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] font-medium text-slate-500 mb-1">내용 (Markdown 지원)</label>
+            <textarea x-model="notesForm.content" rows="12" placeholder="회의 내용을 작성하세요..."
+                      class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-teal-400 resize-y font-mono"></textarea>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="saveNote()" class="px-4 py-1.5 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition font-medium"
+                    x-text="notesForm.id ? '수정' : '저장'"></button>
+            <button @click="notesForm.show = false" class="px-4 py-1.5 text-xs text-slate-500 hover:text-slate-700">취소</button>
+          </div>
+        </div>
+
+        <!-- 회의록 목록 -->
+        <div class="space-y-2">
+          <template x-for="note in notesList" :key="'note-' + note.id">
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+              <!-- 헤더 (클릭하여 펼침) -->
+              <div @click="notesSelectedId = notesSelectedId === note.id ? null : note.id"
+                   class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition"
+                   :class="notesSelectedId === note.id ? 'bg-slate-50' : ''">
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                      :class="note.meeting_type === '주간회의' ? 'bg-teal-100 text-teal-700' : note.meeting_type === '일일회의' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'"
+                      x-text="note.meeting_type"></span>
+                <span x-show="note.week_label" class="text-[10px] text-slate-400" x-text="note.week_label"></span>
+                <span class="text-sm font-medium text-slate-800" x-text="note.title"></span>
+                <span x-show="(note.attachments || []).length > 0" class="text-[10px] text-slate-400" x-text="'📎' + (note.attachments || []).length"></span>
+                <span class="text-[10px] text-slate-400 ml-auto" x-text="note.author"></span>
+                <span class="text-[10px] text-slate-400" x-text="(note.created_at || '').slice(0,10)"></span>
+                <svg class="w-4 h-4 text-slate-400 transition-transform" :class="notesSelectedId === note.id ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+              </div>
+
+              <!-- 내용 (펼침 시) -->
+              <div x-show="notesSelectedId === note.id" x-transition class="border-t border-slate-100">
+                <!-- 본문 -->
+                <div class="px-4 py-4">
+                  <pre class="text-xs text-slate-700 whitespace-pre-wrap font-mono leading-relaxed" x-text="note.content || '(내용 없음)'"></pre>
+                </div>
+
+                <!-- 첨부파일 -->
+                <div x-show="(note.attachments || []).length > 0" class="px-4 pb-3">
+                  <p class="text-[10px] font-bold text-slate-500 mb-2">첨부파일</p>
+                  <div class="flex flex-wrap gap-2">
+                    <template x-for="(att, aIdx) in (note.attachments || [])" :key="'natt-' + aIdx">
+                      <div>
+                        <template x-if="att.isImage">
+                          <a :href="att.url" target="_blank">
+                            <img :src="att.url" class="w-24 h-24 object-cover rounded-lg border border-slate-200 hover:shadow-md transition" :alt="att.name">
+                          </a>
+                        </template>
+                        <template x-if="!att.isImage && isTextFile(att.name)">
+                          <span class="inline-flex items-center gap-1.5">
+                            <a :href="fileProxyUrl(att.url)" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition">
+                              <span>📄</span>
+                              <span class="text-blue-600" x-text="att.name"></span>
+                            </a>
+                            <a :href="att.url + (att.url.includes('?') ? '&' : '?') + 'download=' + encodeURIComponent(att.name)" class="text-[10px] text-slate-400 hover:text-blue-500">다운로드</a>
+                          </span>
+                        </template>
+                        <template x-if="!att.isImage && !isTextFile(att.name)">
+                          <a :href="att.url + (att.url.includes('?') ? '&' : '?') + 'download=' + encodeURIComponent(att.name)" :download="att.name" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition">
+                            <span>📄</span>
+                            <span class="text-blue-600" x-text="att.name"></span>
+                          </a>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- 관리 버튼 -->
+                <div class="px-4 py-2 bg-slate-50 border-t border-slate-100 flex gap-2">
+                  <button @click="openNoteForm(note)" class="text-[10px] text-blue-600 hover:text-blue-800 font-medium">수정</button>
+                  <button @click="deleteNote(note.id)" class="text-[10px] text-red-500 hover:text-red-700 font-medium">삭제</button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 빈 상태 -->
+        <div x-show="!notesLoading && notesList.length === 0 && notesLoaded" class="text-center py-12 text-slate-400">
+          <p class="text-sm">회의록이 없습니다</p>
+          <button @click="openNoteForm(null)" class="mt-3 px-4 py-2 text-xs bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition">첫 회의록 작성</button>
+        </div>
+        <div x-show="notesLoading" class="text-center py-12 text-slate-400 text-xs">로딩 중...</div>
+      </div>
+
+      </div><!-- /왼쪽 회의록 영역 -->
+
+      <!-- 오른쪽: 공유 메모 (1/3) -->
+      <div class="lg:col-span-1">
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 sticky top-20" style="max-height: calc(100vh - 120px); overflow-y: auto;">
+        <div class="flex items-center gap-3 mb-4">
+          <span class="text-xs font-bold text-amber-600 uppercase tracking-widest">MEMO</span>
+          <h2 class="text-sm font-semibold text-slate-700">공유 메모</h2>
+          <span class="text-[10px] text-slate-400" x-text="sharedMemos.length + '개'"></span>
+          <button @click="openMemoForm(null)"
+                  class="ml-auto px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition font-medium">
+            + 메모 작성
+          </button>
+        </div>
+
+        <!-- 메모 작성/수정 폼 -->
+        <div x-show="memoForm.show" x-transition class="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+          <input x-model="memoForm.title" type="text" placeholder="메모 제목"
+                 class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-amber-400">
+          <textarea x-model="memoForm.content" rows="5" placeholder="메모 내용을 작성하세요..."
+                    class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-amber-400 resize-y font-mono whitespace-pre-wrap"></textarea>
+          <div class="flex gap-2">
+            <button @click="saveMemo()" class="px-4 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition font-medium"
+                    x-text="memoForm.id ? '수정 저장' : '메모 저장'"></button>
+            <button @click="memoForm.show = false" class="px-4 py-1.5 text-xs text-slate-500 hover:text-slate-700">취소</button>
+          </div>
+        </div>
+
+        <!-- 메모 목록 -->
+        <div class="space-y-2">
+          <template x-for="memo in sharedMemos" :key="'memo-' + memo.id">
+            <div class="border rounded-xl overflow-hidden"
+                 :class="memo.pinned ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'">
+              <div class="flex items-center gap-2 px-4 py-3">
+                <button @click="toggleMemoPin(memo)" class="text-sm" :title="memo.pinned ? '고정 해제' : '고정'">
+                  <span x-text="memo.pinned ? '📌' : '📄'"></span>
+                </button>
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm font-medium text-slate-800" x-text="memo.title || '(제목 없음)'"></span>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-[10px] text-slate-400" x-text="memo.author"></span>
+                    <span class="text-[10px] text-slate-400" x-text="(memo.updated_at || '').slice(0,16).replace('T',' ')"></span>
+                  </div>
+                </div>
+                <button @click="showMemoHistory(memo.id)" class="text-[10px] px-2 py-1 border border-slate-200 text-slate-500 rounded hover:bg-slate-50 transition">히스토리</button>
+                <button @click="openMemoForm(memo)" class="text-[10px] px-2 py-1 border border-slate-200 text-slate-500 rounded hover:bg-slate-50 transition">수정</button>
+                <button @click="deleteMemo(memo.id)" class="text-[10px] px-2 py-1 border border-red-200 text-red-400 rounded hover:bg-red-50 transition">삭제</button>
+              </div>
+              <div x-show="memo.content" class="px-4 pb-3">
+                <pre class="text-xs text-slate-600 whitespace-pre-wrap font-mono bg-slate-50 rounded-lg p-3 max-h-40 overflow-auto" x-text="memo.content"></pre>
+              </div>
+            </div>
+          </template>
+          <div x-show="sharedMemos.length === 0 && sharedMemosLoaded" class="text-center py-6 text-slate-400 text-xs">메모가 없습니다</div>
+        </div>
+      </div>
+
+      <!-- 메모 히스토리 모달 -->
+      <div x-show="memoHistoryModal.show" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="memoHistoryModal.show = false">
+        <div class="bg-white rounded-2xl shadow-xl w-[600px] max-h-[80vh] overflow-hidden flex flex-col" @click.stop>
+          <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-800">메모 수정 히스토리</h3>
+            <button @click="memoHistoryModal.show = false" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+          </div>
+          <div class="p-5 overflow-y-auto space-y-3">
+            <template x-for="h in memoHistoryModal.history" :key="'mh-' + h.id">
+              <div class="border border-slate-200 rounded-lg p-3">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-[10px] text-slate-400" x-text="(h.created_at || '').slice(0,16).replace('T',' ')"></span>
+                  <span class="text-[10px] text-slate-500 font-medium" x-text="h.edited_by || '(알 수 없음)'"></span>
+                </div>
+                <pre class="text-xs text-slate-600 whitespace-pre-wrap font-mono bg-slate-50 rounded p-2 max-h-32 overflow-auto" x-text="h.content"></pre>
+              </div>
+            </template>
+            <div x-show="memoHistoryModal.history.length === 0" class="text-center py-6 text-slate-400 text-xs">수정 이력이 없습니다</div>
+          </div>
+        </div>
+      </div><!-- /메모 히스토리 모달 -->
+      </div><!-- /오른쪽 메모 col -->
+      </div><!-- /grid -->
+    </section>
+    </template>

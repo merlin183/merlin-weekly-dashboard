@@ -1,0 +1,13 @@
+{
+  "name": "merlin-weekly-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "check:js": "node scripts/check_js.mjs",
+    "test:frontend": "node scripts/test_frontend.mjs",
+    "css:build": "tailwindcss -c tailwind/tailwind.config.cjs -i tailwind/input.css -o static/tailwind.css --minify"
+  },
+  "devDependencies": { "tailwindcss": "3.4.17" }
+}

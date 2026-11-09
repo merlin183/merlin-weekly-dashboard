@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: weekly
+      POSTGRES_USER: weekly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/setup_env.py first}
+    volumes:
+      - weekly-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weekly -d weekly"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://weekly:${POSTGRES_PASSWORD}@db:5432/weekly
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+  bootstrap:
+    profiles: ["tools"]
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://weekly:${POSTGRES_PASSWORD}@db:5432/weekly
+      BACKGROUND_TASKS_ENABLED: "false"
+      STORAGE_AUTO_CREATE_BUCKET: "false"
+    entrypoint: ["python", "scripts/bootstrap_admin.py"]
+    stdin_open: true
+    tty: true
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  weekly-db:

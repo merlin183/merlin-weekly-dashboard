@@ -1,0 +1,633 @@
+    <template x-if="activeTab === 'approval'">
+    <section x-transition class="space-y-4">
+      <!-- 공용(legacy) 세션은 결재 탭 사용 불가 안내 -->
+      <div x-show="isLegacy()" class="bg-white border border-slate-200 rounded-2xl p-8 text-center">
+        <p class="text-sm text-slate-500">공용 세션에서는 전자결재를 사용할 수 없습니다.</p>
+        <p class="text-[11px] text-slate-400 mt-2">개인 계정으로 로그인해주세요.</p>
+      </div>
+      <div x-show="!isLegacy()" class="bg-white border border-slate-200 rounded-2xl p-5">
+        <!-- 헤더 -->
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
+          <span class="text-xs font-bold text-indigo-600 uppercase tracking-widest">APPROVAL</span>
+          <h2 class="text-sm font-semibold text-slate-700">전자결재</h2>
+          <span class="text-[10px] text-slate-400"
+                x-text="(isAdmin() || isPm()) ? '· 전체 결재 (관리자/PM)' : '· 내 신청 + 내가 승인자인 결재만'"></span>
+
+          <!-- 현재 사용자 — JWT 자동 -->
+          <div class="flex items-center gap-1">
+            <span class="text-[10px] text-slate-400">나:</span>
+            <span class="text-xs font-medium text-slate-700" x-text="approvalCurrentUser || '로그인 필요'"></span>
+          </div>
+
+          <div class="ml-auto flex items-center gap-2">
+            <span x-show="isAdmin() || isPm()" class="text-[10px] text-slate-400">승인자 설정은 설정 탭에서</span>
+            <button x-show="!isLegacy()" @click="openApprovalModal(null)"
+                    class="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium">+ 새 요청</button>
+          </div>
+        </div>
+
+        <!-- 결재자 설정은 설정 탭의 '결재 승인자 설정' 카드로 이동됨 -->
+
+        <!-- 필터 바 -->
+        <div class="flex items-center gap-2 mb-3 flex-wrap">
+          <div class="flex gap-1">
+            <button @click="approvalFilter = 'all'" class="px-3 py-1 text-[10px] rounded-md border transition font-medium"
+                    :class="approvalFilter === 'all' ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-white text-slate-400 border-slate-200'">전체</button>
+            <button @click="approvalFilter = 'mine'" class="px-3 py-1 text-[10px] rounded-md border transition font-medium"
+                    :class="approvalFilter === 'mine' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-400 border-slate-200'">내 요청</button>
+            <button @click="approvalFilter = 'inbox'" class="px-3 py-1 text-[10px] rounded-md border transition font-medium flex items-center gap-1"
+                    :class="approvalFilter === 'inbox' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200'">
+              받은함
+              <span x-show="approvalInboxCount > 0" class="text-[9px] bg-red-500 text-white px-1.5 rounded-full" x-text="approvalInboxCount"></span>
+            </button>
+          </div>
+          <span class="text-slate-300">|</span>
+          <div class="flex gap-1">
+            <button @click="approvalStatusFilter = ''" class="px-2 py-0.5 text-[10px] rounded border" :class="!approvalStatusFilter ? 'bg-slate-100 border-slate-300' : 'border-slate-200 text-slate-400'">모든 상태</button>
+            <button @click="approvalStatusFilter = '대기'" class="px-2 py-0.5 text-[10px] rounded border" :class="approvalStatusFilter === '대기' ? 'bg-amber-100 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-400'">대기</button>
+            <button @click="approvalStatusFilter = '승인'" class="px-2 py-0.5 text-[10px] rounded border" :class="approvalStatusFilter === '승인' ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'border-slate-200 text-slate-400'">승인</button>
+            <button @click="approvalStatusFilter = '반려'" class="px-2 py-0.5 text-[10px] rounded border" :class="approvalStatusFilter === '반려' ? 'bg-red-100 border-red-300 text-red-700' : 'border-slate-200 text-slate-400'">반려</button>
+          </div>
+          <span class="ml-auto text-[10px] text-slate-400" x-text="filteredApprovals.length + '건'"></span>
+        </div>
+
+        <!-- 요청 목록 -->
+        <div class="border border-slate-200 rounded-lg overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-[10px] text-slate-500 uppercase">
+              <tr>
+                <th class="text-left px-3 py-2 w-24">신청일</th>
+                <th class="text-left px-3 py-2 w-20">유형</th>
+                <th class="text-left px-3 py-2">제목</th>
+                <th class="text-right px-3 py-2 w-24">금액</th>
+                <th class="text-left px-3 py-2 w-20">요청자</th>
+                <th class="text-left px-3 py-2 w-44">결재 단계</th>
+                <th class="text-center px-3 py-2 w-16">상태</th>
+                <th class="text-right px-3 py-2 w-32">액션</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="item in filteredApprovals" :key="'apr-' + item.id">
+                <tr class="border-t border-slate-100 hover:bg-slate-50/50">
+                  <td class="px-3 py-2 text-[11px] text-slate-500" x-text="(item.created_at || '').slice(0,10)"></td>
+                  <td class="px-3 py-2">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                          :class="item.req_type === 'personal_expense' ? 'bg-blue-50 text-blue-600' : item.req_type === 'cert_employment' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+                          x-text="approvalTypeLabel(item.req_type)"></span>
+                  </td>
+                  <td class="px-3 py-2">
+                    <button @click="openApprovalDetail(item)"
+                            class="text-xs text-slate-700 font-medium text-left hover:text-indigo-600 hover:underline"
+                            x-text="item.title"></button>
+                    <div x-show="item.spent_at || (item.items && item.items.length > 0)" class="text-[10px] text-slate-400 mt-0.5">
+                      <span x-show="item.spent_at" x-text="item.spent_at"></span>
+                      <span x-show="item.items && item.items.length > 0"
+                            x-text="(item.spent_at ? ' · ' : '') + '항목 ' + (item.items || []).length + '건'"></span>
+                    </div>
+                    <div x-show="(item.attachments && item.attachments.length > 0) || (item.items || []).some(i => i.receipt)" class="mt-1 flex gap-1 flex-wrap">
+                      <span x-show="(item.items || []).some(i => i.receipt)" class="text-[10px] px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded"
+                            x-text="'🧾 영수증 ' + (item.items || []).filter(i => i.receipt).length + '장'"></span>
+                      <template x-for="(att, aIdx) in (item.attachments || [])" :key="'att-'+item.id+'-'+aIdx">
+                        <a :href="att.url" target="_blank" @click.stop class="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-600" x-text="'📎 ' + att.name"></a>
+                      </template>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2 text-xs text-slate-700 text-right" x-text="item.amount !== null && item.amount !== undefined ? Number(item.amount).toLocaleString() + '원' : '-'"></td>
+                  <td class="px-3 py-2 text-xs text-slate-600" x-text="item.requester"></td>
+                  <td class="px-3 py-2 text-[11px]">
+                    <!-- 도서구입: 대표 단독 1단계 -->
+                    <template x-if="isSingleStageType(item.req_type)">
+                      <div class="flex items-center gap-1">
+                        <span class="text-[9px] text-slate-400 w-6">대표</span>
+                        <span class="text-slate-600" x-text="item.admin_approver || '-'"></span>
+                        <span class="text-[9px] px-1 rounded font-medium"
+                              :class="(item.admin_status||'대기')==='승인'?'bg-emerald-100 text-emerald-700':(item.admin_status||'대기')==='반려'?'bg-red-100 text-red-700':'bg-amber-50 text-amber-600'"
+                              x-text="item.admin_status || '대기'"></span>
+                      </div>
+                    </template>
+                    <!-- 그 외: 1차 PM → 2차 관리자 -->
+                    <template x-if="!isSingleStageType(item.req_type)">
+                      <div>
+                        <div class="flex items-center gap-1">
+                          <span class="text-[9px] text-slate-400 w-6">PM</span>
+                          <span class="text-slate-600" x-text="item.pm_approver || '-'"></span>
+                          <span class="text-[9px] px-1 rounded font-medium"
+                                :class="(item.pm_status||'대기')==='승인'?'bg-emerald-100 text-emerald-700':(item.pm_status||'대기')==='반려'?'bg-red-100 text-red-700':'bg-amber-50 text-amber-600'"
+                                x-text="item.pm_status || '대기'"></span>
+                        </div>
+                        <div class="flex items-center gap-1 mt-0.5">
+                          <span class="text-[9px] text-slate-400 w-6">관리</span>
+                          <span class="text-slate-600" x-text="item.admin_approver || '-'"></span>
+                          <span class="text-[9px] px-1 rounded font-medium"
+                                :class="(item.admin_status||'대기')==='승인'?'bg-emerald-100 text-emerald-700':(item.admin_status||'대기')==='반려'?'bg-red-100 text-red-700':(item.pm_status==='승인'?'bg-amber-50 text-amber-600':'bg-slate-100 text-slate-400')"
+                                x-text="item.admin_status || '대기'"></span>
+                        </div>
+                      </div>
+                    </template>
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                          :class="item.status === '승인' ? 'bg-emerald-100 text-emerald-700' : item.status === '반려' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'"
+                          x-text="item.status"></span>
+                  </td>
+                  <td class="px-3 py-2 text-right">
+                    <div class="flex gap-1 justify-end items-center flex-wrap">
+                      <!-- 내가 현재 stage 담당자고 대기면 승인/반려 -->
+                      <template x-if="item.status === '대기' && isMyInbox(item)">
+                        <span class="flex gap-1">
+                          <button @click="openDecideModal(item.id, '승인')" class="text-[10px] px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded">승인</button>
+                          <button @click="openDecideModal(item.id, '반려')" class="text-[10px] px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded">반려</button>
+                        </span>
+                      </template>
+                      <!-- 요청자 본인 대기건 → 수정 -->
+                      <template x-if="item.status === '대기' && item.requester === approvalCurrentUser && !isMyInbox(item)">
+                        <button @click="openApprovalModal(item)" class="text-[10px] px-2 py-1 border border-slate-200 text-slate-600 rounded hover:bg-slate-50">수정</button>
+                      </template>
+                      <!-- 삭제 → PM·어드민 전체 / 멤버는 본인 대기건만 -->
+                      <template x-if="(isPm() || isAdmin()) || (item.status === '대기' && item.requester === approvalCurrentUser)">
+                        <button @click="deleteApproval(item)" class="text-[10px] px-2 py-1 border border-red-200 text-red-500 rounded hover:bg-red-50">삭제</button>
+                      </template>
+                      <!-- 종료 + 사유 있음 -->
+                      <template x-if="item.status !== '대기' && (item.pm_note || item.admin_note)">
+                        <span class="text-[10px] text-slate-400" :title="(item.pm_note ? '1차 PM: '+item.pm_note+'\n' : '') + (item.admin_note ? '2차 관리자: '+item.admin_note : '')">💬 사유</span>
+                      </template>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="filteredApprovals.length === 0">
+                <td colspan="8" class="px-3 py-10 text-center text-slate-400 text-xs">요청이 없습니다</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 요청 작성/수정 모달 -->
+      <div x-show="approvalModal.show" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="approvalModal.show = false">
+        <div class="bg-white rounded-2xl shadow-xl w-[600px] max-h-[90vh] overflow-hidden flex flex-col" @click.stop>
+          <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-800" x-text="approvalModal.id ? '요청 수정' : '새 승인 요청'"></h3>
+            <button @click="approvalModal.show = false" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+          </div>
+          <div class="p-5 space-y-3 overflow-y-auto">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-1">유형</label>
+              <select x-model="approvalModal.req_type" @change="onApprovalTypeChange()"
+                      class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none bg-white">
+                <option value="personal_expense">개인경비 정산</option>
+                <option value="cert_employment">재직증명서 요청</option>
+                <option value="book_purchase">도서 구입 신청서</option>
+              </select>
+            </div>
+            <!-- 제목 — 도서구입은 도서명이 제목이 되므로 숨김 -->
+            <div x-show="approvalModal.req_type !== 'book_purchase'">
+              <label class="block text-[10px] font-bold text-slate-500 mb-1">제목 *</label>
+              <input x-model="approvalModal.title" type="text"
+                     :placeholder="approvalModal.req_type === 'personal_expense' ? '예: 5월 개인경비 정산' : '예: 재직증명서 1통 — 은행 제출용'"
+                     class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400">
+            </div>
+
+            <!-- 개인경비: 다항목 테이블 -->
+            <div x-show="approvalModal.req_type === 'personal_expense'">
+              <div class="flex items-center justify-between mb-2">
+                <label class="text-[10px] font-bold text-slate-500">사용 내역 *</label>
+                <div class="flex items-center gap-3">
+                  <span class="text-[11px] text-slate-500">합계
+                    <span class="font-bold text-indigo-600" x-text="approvalTotalFormatted + '원'"></span>
+                  </span>
+                  <button @click="addApprovalItem()" class="px-2 py-1 text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 font-medium">+ 항목 추가</button>
+                </div>
+              </div>
+              <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                <table class="w-full text-xs">
+                  <thead class="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th class="px-2 py-1.5 text-left font-semibold text-slate-600 w-28">날짜</th>
+                      <th class="px-2 py-1.5 text-left font-semibold text-slate-600 w-20">분류</th>
+                      <th class="px-2 py-1.5 text-right font-semibold text-slate-600 w-24">금액(원)</th>
+                      <th class="px-2 py-1.5 text-left font-semibold text-slate-600">사용처</th>
+                      <th class="px-2 py-1.5 text-left font-semibold text-slate-600">메모</th>
+                      <th class="px-2 py-1.5 text-left font-semibold text-slate-600 w-32">영수증</th>
+                      <th class="px-1 py-1.5 w-6"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(it, idx) in approvalModal.items" :key="'item-'+idx">
+                      <tr class="border-b border-slate-100">
+                        <td class="px-1 py-1"><input type="date" x-model="it.date" class="w-full px-1.5 py-1 border border-slate-200 rounded text-xs outline-none"></td>
+                        <td class="px-1 py-1">
+                          <select x-model="it.category" class="w-full px-1 py-1 border border-slate-200 rounded text-xs outline-none bg-white">
+                            <option>식대</option>
+                            <option>교통비</option>
+                            <option>사무용품</option>
+                            <option>통신비</option>
+                            <option>기타</option>
+                          </select>
+                        </td>
+                        <td class="px-1 py-1"><input type="number" min="0" x-model.number="it.amount" placeholder="0" class="w-full px-1.5 py-1 border border-slate-200 rounded text-xs text-right outline-none tabular-nums"></td>
+                        <td class="px-1 py-1"><input type="text" x-model="it.vendor" placeholder="예: OO식당" class="w-full px-1.5 py-1 border border-slate-200 rounded text-xs outline-none"></td>
+                        <td class="px-1 py-1"><input type="text" x-model="it.memo" placeholder="옵션" class="w-full px-1.5 py-1 border border-slate-200 rounded text-xs outline-none"></td>
+                        <td class="px-1 py-1">
+                          <template x-if="!it.receipt">
+                            <input type="file" @change="uploadApprovalItemReceipt(idx, $event)" class="text-[10px] w-full">
+                          </template>
+                          <template x-if="it.receipt">
+                            <div class="flex items-center gap-1 text-[10px]">
+                              <a :href="it.receipt.url" target="_blank" class="text-indigo-600 hover:underline truncate flex-1" :title="it.receipt.name">📎 <span x-text="it.receipt.name"></span></a>
+                              <button @click="it.receipt = null" class="text-slate-400 hover:text-red-500">&times;</button>
+                            </div>
+                          </template>
+                        </td>
+                        <td class="px-1 py-1 text-center">
+                          <button @click="removeApprovalItem(idx)" class="text-slate-400 hover:text-red-500 text-sm">&times;</button>
+                        </td>
+                      </tr>
+                    </template>
+                    <tr x-show="approvalModal.items.length === 0">
+                      <td colspan="7" class="px-2 py-3 text-center text-[11px] text-slate-400">"+ 항목 추가"로 사용한 항목을 한 줄씩 등록하세요</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- 재직증명서: 발급에 필요한 정보 (이름·주민번호·주소·용도) -->
+            <div x-show="approvalModal.req_type === 'cert_employment'" class="border border-emerald-200 bg-emerald-50/30 rounded-lg p-3 space-y-3">
+              <p class="text-[10px] font-bold text-emerald-700">증명서 발급 정보</p>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-500 mb-1">이름 <span class="text-red-500">*</span></label>
+                  <input x-model="approvalModal.cert_info.name" type="text" placeholder="이름 입력"
+                         class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+                </div>
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-500 mb-1">주민번호</label>
+                  <input x-model="approvalModal.cert_info.ssn" type="text" placeholder="생년월일 또는 식별번호 입력"
+                         autocomplete="off"
+                         class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white font-mono">
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">주소</label>
+                <input x-model="approvalModal.cert_info.address" type="text" placeholder="예: 서울시 ○○구 ○○로 123"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">용도 <span class="text-red-500">*</span></label>
+                <input x-model="approvalModal.cert_info.purpose" type="text" placeholder="예: ○○은행 대출 / 비자 신청 / 임대차 등"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+              </div>
+              <p class="text-[10px] text-amber-700">⚠ 주민번호는 발급 처리 후 admin이 삭제 권장 (민감 정보).</p>
+            </div>
+
+            <!-- 도서 구입: 신청 정보 (도서명·저자/출판사·구입처·목적) -->
+            <div x-show="approvalModal.req_type === 'book_purchase'" class="border border-amber-200 bg-amber-50/30 rounded-lg p-3 space-y-3">
+              <p class="text-[10px] font-bold text-amber-700">도서 구입 정보 · 대표 단독 결재 (1단계)</p>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">신청부서</label>
+                <input x-model="approvalModal.book_info.department" type="text" placeholder="예: SBM비즈니스아카데미"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">도서명 <span class="text-red-500">*</span></label>
+                <input x-model="approvalModal.book_info.book_name" type="text" placeholder="예: AI 격차"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">저자 / 출판사</label>
+                <input x-model="approvalModal.book_info.author_publisher" type="text" placeholder="예: 강협, 김종우 외 저 | 도서담"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">구입처 / 링크</label>
+                <input x-model="approvalModal.book_info.purchase_link" type="text" placeholder="예: https://example.com/book"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white font-mono">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 mb-1">구입목적 <span class="text-red-500">*</span></label>
+                <input x-model="approvalModal.book_info.purpose" type="text" placeholder="예: AI로 조직과 업무를 재설계하는 인사이트 확보"
+                       class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 bg-white">
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-1">메모 (옵션)</label>
+              <textarea x-model="approvalModal.detail" rows="2"
+                        :placeholder="approvalModal.req_type === 'cert_employment' ? '예: 통수, 영문 여부 등 추가 요청사항' : '신청 사유 / 배경 등'"
+                        class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 resize-none"></textarea>
+            </div>
+
+            <!-- 재직증명서: 첨부 (참고용) / 개인경비: 추가 자료 -->
+            <div>
+              <label class="block text-[10px] font-bold text-slate-500 mb-1" x-text="approvalModal.req_type === 'personal_expense' ? '추가 자료 (옵션)' : '참고 첨부 (옵션)'"></label>
+              <div class="flex items-center gap-2 mb-2">
+                <input type="file" @change="uploadApprovalAttachment($event)" class="text-xs">
+              </div>
+              <div x-show="approvalModal.attachments.length > 0" class="space-y-1">
+                <template x-for="(att, idx) in approvalModal.attachments" :key="'mod-att-'+idx">
+                  <div class="flex items-center gap-2 text-xs bg-slate-50 px-2 py-1 rounded">
+                    <a :href="att.url" target="_blank" class="text-indigo-600 hover:underline flex-1" x-text="'📎 ' + att.name"></a>
+                    <button @click="removeApprovalAttachment(idx)" class="text-slate-400 hover:text-red-500">&times;</button>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="pt-2 border-t border-slate-100 space-y-2">
+              <div class="flex items-center gap-3">
+                <label class="text-[10px] font-bold text-slate-500 w-12">요청자</label>
+                <span class="text-xs font-medium text-slate-700" x-text="(currentUser && currentUser.name) || '로그인 필요'"></span>
+              </div>
+              <!-- 2단계 결재 안내 (요청자 변경 불가, 설정 자동) -->
+              <div class="flex items-center gap-3">
+                <label class="text-[10px] font-bold text-slate-500 w-12">결재선</label>
+                <!-- 도서구입: 대표 단독 1단계 -->
+                <div x-show="isSingleStageType(approvalModal.req_type)" class="flex items-center gap-2 text-xs">
+                  <span class="px-2 py-1 bg-slate-100 text-slate-600 rounded font-medium" x-text="'팀원: ' + (approvalCurrentUser || '본인')"></span>
+                  <span class="text-slate-300">→</span>
+                  <span class="px-2 py-1 bg-purple-50 text-purple-700 rounded font-medium" x-text="'대표: ' + (approvalPairFor(approvalModal.req_type).admin || '미설정')"></span>
+                </div>
+                <!-- 그 외: PM → 관리자 2단계 -->
+                <div x-show="!isSingleStageType(approvalModal.req_type)" class="flex items-center gap-2 text-xs">
+                  <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded font-medium" x-text="'1차 PM: ' + (approvalPairFor(approvalModal.req_type).pm || '(미설정)')"></span>
+                  <span class="text-slate-300">→</span>
+                  <span class="px-2 py-1 bg-purple-50 text-purple-700 rounded font-medium" x-text="'2차 관리자: ' + (approvalPairFor(approvalModal.req_type).admin || '(미설정)')"></span>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-400">* 결재선은 관리자 설정에서 일괄 지정됩니다. 2단계 유형은 미설정 시 신청 불가.</p>
+            </div>
+          </div>
+          <div class="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+            <button @click="approvalModal.show = false" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">취소</button>
+            <button @click="submitApproval()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium">
+              <span x-text="approvalModal.id ? '수정 저장' : '요청 제출'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 결재 상세 모달 (read-only — 항목·영수증·메모·결과) -->
+      <div x-show="approvalDetailModal.show" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="approvalDetailModal.show = false">
+        <div class="bg-white rounded-2xl shadow-xl w-[720px] max-h-[90vh] overflow-hidden flex flex-col" @click.stop>
+          <template x-if="approvalDetailModal.item">
+            <div class="flex flex-col max-h-[90vh] overflow-hidden">
+              <!-- 헤더 -->
+              <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+                        :class="approvalDetailModal.item.req_type === 'personal_expense' ? 'bg-blue-50 text-blue-600' : approvalDetailModal.item.req_type === 'book_purchase' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+                        x-text="approvalTypeLabel(approvalDetailModal.item.req_type)"></span>
+                  <h3 class="text-sm font-bold text-slate-800 truncate" x-text="approvalDetailModal.item.title"></h3>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold flex-shrink-0"
+                        :class="approvalDetailModal.item.status === '승인' ? 'bg-emerald-100 text-emerald-700' : approvalDetailModal.item.status === '반려' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'"
+                        x-text="approvalDetailModal.item.status"></span>
+                </div>
+                <button @click="approvalDetailModal.show = false" class="text-slate-400 hover:text-slate-600 text-lg flex-shrink-0">&times;</button>
+              </div>
+
+              <!-- 본문 -->
+              <div class="p-5 space-y-4 overflow-y-auto">
+                <!-- 메타 정보 -->
+                <div class="grid grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <div class="text-[10px] text-slate-400 mb-0.5">요청자</div>
+                    <div class="font-medium text-slate-700" x-text="approvalDetailModal.item.requester"></div>
+                  </div>
+                  <div>
+                    <div class="text-[10px] text-slate-400 mb-0.5">신청일</div>
+                    <div class="font-medium text-slate-700 tabular-nums" x-text="(approvalDetailModal.item.created_at || '').slice(0,16).replace('T',' ')"></div>
+                  </div>
+                  <div x-show="approvalDetailModal.item.amount !== null && approvalDetailModal.item.amount !== undefined">
+                    <div class="text-[10px] text-slate-400 mb-0.5">합계</div>
+                    <div class="font-bold text-indigo-600 tabular-nums" x-text="Number(approvalDetailModal.item.amount || 0).toLocaleString() + '원'"></div>
+                  </div>
+                </div>
+                <!-- 결재 진행 -->
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                  <div class="text-[10px] font-bold text-slate-500 mb-2">결재 진행</div>
+                  <!-- 도서구입: 대표 단독 1단계 -->
+                  <div x-show="isSingleStageType(approvalDetailModal.item.req_type)" class="text-xs">
+                    <div class="p-2 rounded border"
+                         :class="(approvalDetailModal.item.admin_status||'대기')==='승인'?'bg-emerald-50 border-emerald-200':(approvalDetailModal.item.admin_status||'대기')==='반려'?'bg-red-50 border-red-200':'bg-amber-50 border-amber-200'">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] font-bold text-slate-500">대표 결재</span>
+                        <span class="text-[10px] font-bold"
+                              :class="(approvalDetailModal.item.admin_status||'대기')==='승인'?'text-emerald-700':(approvalDetailModal.item.admin_status||'대기')==='반려'?'text-red-700':'text-amber-700'"
+                              x-text="approvalDetailModal.item.admin_status || '대기'"></span>
+                      </div>
+                      <div class="font-medium text-slate-700" x-text="approvalDetailModal.item.admin_approver || '-'"></div>
+                      <div class="text-[10px] text-slate-500 tabular-nums" x-show="approvalDetailModal.item.admin_decided_at"
+                           x-text="(approvalDetailModal.item.admin_decided_at || '').slice(0,16).replace('T',' ')"></div>
+                      <div class="text-[10px] text-slate-600 mt-1 whitespace-pre-wrap" x-show="approvalDetailModal.item.admin_note" x-text="approvalDetailModal.item.admin_note"></div>
+                    </div>
+                  </div>
+                  <!-- 그 외: 1차 PM → 2차 관리자 -->
+                  <div x-show="!isSingleStageType(approvalDetailModal.item.req_type)" class="flex items-stretch gap-2 text-xs">
+                    <div class="flex-1 p-2 rounded border"
+                         :class="(approvalDetailModal.item.pm_status||'대기')==='승인'?'bg-emerald-50 border-emerald-200':(approvalDetailModal.item.pm_status||'대기')==='반려'?'bg-red-50 border-red-200':'bg-amber-50 border-amber-200'">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] font-bold text-slate-500">1차 PM</span>
+                        <span class="text-[10px] font-bold"
+                              :class="(approvalDetailModal.item.pm_status||'대기')==='승인'?'text-emerald-700':(approvalDetailModal.item.pm_status||'대기')==='반려'?'text-red-700':'text-amber-700'"
+                              x-text="approvalDetailModal.item.pm_status || '대기'"></span>
+                      </div>
+                      <div class="font-medium text-slate-700" x-text="approvalDetailModal.item.pm_approver || '-'"></div>
+                      <div class="text-[10px] text-slate-500 tabular-nums" x-show="approvalDetailModal.item.pm_decided_at"
+                           x-text="(approvalDetailModal.item.pm_decided_at || '').slice(0,16).replace('T',' ')"></div>
+                      <div class="text-[10px] text-slate-600 mt-1 whitespace-pre-wrap" x-show="approvalDetailModal.item.pm_note" x-text="approvalDetailModal.item.pm_note"></div>
+                    </div>
+                    <div class="self-center text-slate-300">→</div>
+                    <div class="flex-1 p-2 rounded border"
+                         :class="(approvalDetailModal.item.admin_status||'대기')==='승인'?'bg-emerald-50 border-emerald-200':(approvalDetailModal.item.admin_status||'대기')==='반려'?'bg-red-50 border-red-200':(approvalDetailModal.item.pm_status==='승인'?'bg-amber-50 border-amber-200':'bg-slate-50 border-slate-200')">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-[10px] font-bold text-slate-500">2차 관리자</span>
+                        <span class="text-[10px] font-bold"
+                              :class="(approvalDetailModal.item.admin_status||'대기')==='승인'?'text-emerald-700':(approvalDetailModal.item.admin_status||'대기')==='반려'?'text-red-700':(approvalDetailModal.item.pm_status==='승인'?'text-amber-700':'text-slate-400')"
+                              x-text="approvalDetailModal.item.admin_status || '대기'"></span>
+                      </div>
+                      <div class="font-medium text-slate-700" x-text="approvalDetailModal.item.admin_approver || '-'"></div>
+                      <div class="text-[10px] text-slate-500 tabular-nums" x-show="approvalDetailModal.item.admin_decided_at"
+                           x-text="(approvalDetailModal.item.admin_decided_at || '').slice(0,16).replace('T',' ')"></div>
+                      <div class="text-[10px] text-slate-600 mt-1 whitespace-pre-wrap" x-show="approvalDetailModal.item.admin_note" x-text="approvalDetailModal.item.admin_note"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 개인경비 항목 테이블 -->
+                <div x-show="approvalDetailModal.item.req_type === 'personal_expense' && approvalDetailModal.item.items && approvalDetailModal.item.items.length > 0">
+                  <h4 class="text-[10px] font-bold text-slate-500 mb-2">사용 내역</h4>
+                  <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table class="w-full text-xs">
+                      <thead class="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          <th class="px-2 py-1.5 text-left font-semibold text-slate-600 w-24">날짜</th>
+                          <th class="px-2 py-1.5 text-left font-semibold text-slate-600 w-20">분류</th>
+                          <th class="px-2 py-1.5 text-right font-semibold text-slate-600 w-24">금액(원)</th>
+                          <th class="px-2 py-1.5 text-left font-semibold text-slate-600">사용처</th>
+                          <th class="px-2 py-1.5 text-left font-semibold text-slate-600">메모</th>
+                          <th class="px-2 py-1.5 text-left font-semibold text-slate-600 w-24">영수증</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-for="(it, idx) in (approvalDetailModal.item.items || [])" :key="'di-'+idx">
+                          <tr class="border-b border-slate-100">
+                            <td class="px-2 py-1.5 text-slate-700 tabular-nums" x-text="it.date || '-'"></td>
+                            <td class="px-2 py-1.5 text-slate-600" x-text="it.category || '-'"></td>
+                            <td class="px-2 py-1.5 text-right text-slate-700 tabular-nums" x-text="Number(it.amount || 0).toLocaleString()"></td>
+                            <td class="px-2 py-1.5 text-slate-600" x-text="it.vendor || '-'"></td>
+                            <td class="px-2 py-1.5 text-slate-500" x-text="it.memo || '-'"></td>
+                            <td class="px-2 py-1.5">
+                              <a x-show="it.receipt" :href="it.receipt && it.receipt.url" target="_blank"
+                                 class="text-[11px] text-indigo-600 hover:underline truncate inline-block max-w-full" :title="it.receipt && it.receipt.name">📎 보기</a>
+                              <span x-show="!it.receipt" class="text-[10px] text-slate-400">없음</span>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                      <tfoot class="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                          <td colspan="2" class="px-2 py-1.5 text-[10px] text-slate-500 font-medium">합계</td>
+                          <td class="px-2 py-1.5 text-right text-sm font-bold text-indigo-600 tabular-nums" x-text="Number(approvalDetailModal.item.amount || 0).toLocaleString()"></td>
+                          <td colspan="3"></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- 재직증명서 발급 정보 -->
+                <div x-show="approvalDetailModal.item.req_type === 'cert_employment' && approvalDetailModal.item.cert_info"
+                     class="border border-emerald-200 bg-emerald-50/30 rounded-lg p-3">
+                  <h4 class="text-[10px] font-bold text-emerald-700 mb-2">증명서 발급 정보</h4>
+                  <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <div class="text-[10px] text-slate-400">이름</div>
+                      <div class="font-medium text-slate-800" x-text="(approvalDetailModal.item.cert_info && approvalDetailModal.item.cert_info.name) || '-'"></div>
+                    </div>
+                    <div>
+                      <div class="text-[10px] text-slate-400">주민번호</div>
+                      <div class="font-mono text-slate-800" x-text="(approvalDetailModal.item.cert_info && approvalDetailModal.item.cert_info.ssn) || '-'"></div>
+                    </div>
+                    <div class="col-span-2">
+                      <div class="text-[10px] text-slate-400">주소</div>
+                      <div class="text-slate-800" x-text="(approvalDetailModal.item.cert_info && approvalDetailModal.item.cert_info.address) || '-'"></div>
+                    </div>
+                    <div class="col-span-2">
+                      <div class="text-[10px] text-slate-400">용도</div>
+                      <div class="text-slate-800" x-text="(approvalDetailModal.item.cert_info && approvalDetailModal.item.cert_info.purpose) || '-'"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 도서 구입 정보 -->
+                <div x-show="approvalDetailModal.item.req_type === 'book_purchase' && approvalDetailModal.item.book_info"
+                     class="border border-amber-200 bg-amber-50/30 rounded-lg p-3">
+                  <h4 class="text-[10px] font-bold text-amber-700 mb-2">도서 구입 정보</h4>
+                  <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <div class="text-[10px] text-slate-400">신청부서</div>
+                      <div class="text-slate-800" x-text="(approvalDetailModal.item.book_info && approvalDetailModal.item.book_info.department) || '-'"></div>
+                    </div>
+                    <div>
+                      <div class="text-[10px] text-slate-400">도서명</div>
+                      <div class="font-medium text-slate-800" x-text="(approvalDetailModal.item.book_info && approvalDetailModal.item.book_info.book_name) || '-'"></div>
+                    </div>
+                    <div class="col-span-2">
+                      <div class="text-[10px] text-slate-400">저자 / 출판사</div>
+                      <div class="text-slate-800" x-text="(approvalDetailModal.item.book_info && approvalDetailModal.item.book_info.author_publisher) || '-'"></div>
+                    </div>
+                    <div class="col-span-2">
+                      <div class="text-[10px] text-slate-400">구입처 / 링크</div>
+                      <template x-if="approvalDetailModal.item.book_info && approvalDetailModal.item.book_info.purchase_link">
+                        <a :href="approvalDetailModal.item.book_info.purchase_link" target="_blank" class="text-indigo-600 hover:underline break-all" x-text="approvalDetailModal.item.book_info.purchase_link"></a>
+                      </template>
+                      <template x-if="!(approvalDetailModal.item.book_info && approvalDetailModal.item.book_info.purchase_link)">
+                        <div class="text-slate-800">-</div>
+                      </template>
+                    </div>
+                    <div class="col-span-2">
+                      <div class="text-[10px] text-slate-400">구입목적</div>
+                      <div class="text-slate-800" x-text="(approvalDetailModal.item.book_info && approvalDetailModal.item.book_info.purpose) || '-'"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 메모 -->
+                <div x-show="approvalDetailModal.item.detail">
+                  <h4 class="text-[10px] font-bold text-slate-500 mb-1">메모</h4>
+                  <p class="text-xs text-slate-700 whitespace-pre-wrap bg-slate-50 px-3 py-2 rounded-lg" x-text="approvalDetailModal.item.detail"></p>
+                </div>
+
+                <!-- 참고 첨부 (신청 전체) -->
+                <div x-show="approvalDetailModal.item.attachments && approvalDetailModal.item.attachments.length > 0">
+                  <h4 class="text-[10px] font-bold text-slate-500 mb-1">참고 첨부</h4>
+                  <div class="space-y-1">
+                    <template x-for="(att, idx) in (approvalDetailModal.item.attachments || [])" :key="'da-'+idx">
+                      <div class="flex items-center gap-2 text-xs bg-slate-50 px-2 py-1 rounded">
+                        <a :href="att.url" target="_blank" class="text-indigo-600 hover:underline flex-1" x-text="'📎 ' + att.name"></a>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- 하단 액션 -->
+              <div class="px-5 py-3 border-t border-slate-200 flex justify-end gap-2 flex-shrink-0">
+                <!-- 삭제 — PM·어드민 전체 / 멤버는 본인 대기건만 (왼쪽 배치) -->
+                <template x-if="(isPm() || isAdmin()) || (approvalDetailModal.item.status === '대기' && approvalDetailModal.item.requester === approvalCurrentUser)">
+                  <button @click="deleteApproval(approvalDetailModal.item)"
+                          class="px-3 py-1.5 text-xs border border-red-200 text-red-500 rounded hover:bg-red-50 mr-auto">삭제</button>
+                </template>
+                <!-- 인쇄/PDF — 승인된 건만 (재직증명서·개인경비) -->
+                <template x-if="approvalDetailModal.item.status === '승인' && ['cert_employment','personal_expense','book_purchase'].includes(approvalDetailModal.item.req_type)">
+                  <button @click="openApprovalPrint(approvalDetailModal.item)"
+                          class="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-800 text-white rounded font-medium">📄 인쇄/PDF</button>
+                </template>
+                <!-- 요청자 + 대기 + 내 차례 아님 → 수정 -->
+                <template x-if="approvalDetailModal.item.status === '대기' && approvalDetailModal.item.requester === approvalCurrentUser && !isMyInbox(approvalDetailModal.item)">
+                  <button @click="approvalDetailModal.show = false; openApprovalModal(approvalDetailModal.item)"
+                          class="px-3 py-1.5 text-xs border border-slate-200 text-slate-600 rounded hover:bg-slate-50">수정</button>
+                </template>
+                <!-- 현재 stage 담당자면 결재 버튼 -->
+                <template x-if="approvalDetailModal.item.status === '대기' && isMyInbox(approvalDetailModal.item)">
+                  <button @click="openDecideModal(approvalDetailModal.item.id, '반려'); approvalDetailModal.show = false"
+                          class="px-3 py-1.5 text-xs bg-red-500 hover:bg-red-600 text-white rounded font-medium">반려</button>
+                </template>
+                <template x-if="approvalDetailModal.item.status === '대기' && isMyInbox(approvalDetailModal.item)">
+                  <button @click="openDecideModal(approvalDetailModal.item.id, '승인'); approvalDetailModal.show = false"
+                          class="px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium"
+                          x-text="isSingleStageType(approvalDetailModal.item.req_type) ? '대표 승인' : (approvalStageOf(approvalDetailModal.item) === 'pm' ? '1차 PM 승인' : '2차 최종 승인')"></button>
+                </template>
+                <button @click="approvalDetailModal.show = false" class="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700">닫기</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- 승인/반려 모달 -->
+      <div x-show="approvalDecideModal.show" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="approvalDecideModal.show = false">
+        <div class="bg-white rounded-2xl shadow-xl w-[420px]" @click.stop>
+          <div class="px-5 py-4 border-b border-slate-200">
+            <h3 class="text-sm font-bold text-slate-800" x-text="approvalDecideModal.decision === '승인' ? '✅ 승인' : '❌ 반려'"></h3>
+          </div>
+          <div class="p-5 space-y-2">
+            <label class="block text-[10px] font-bold text-slate-500"
+                   x-text="approvalDecideModal.decision === '승인' ? '메모 (선택)' : '반려 사유 (권장)'"></label>
+            <textarea x-model="approvalDecideModal.note" rows="3"
+                      class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-400 resize-none"></textarea>
+          </div>
+          <div class="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+            <button @click="approvalDecideModal.show = false" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">취소</button>
+            <button @click="submitDecide()"
+                    class="px-4 py-2 text-white rounded-lg text-sm font-medium"
+                    :class="approvalDecideModal.decision === '승인' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-500 hover:bg-red-600'">
+              확정
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+    </template>

@@ -1,0 +1,549 @@
+    <template x-if="activeTab === 'hr'">
+    <section x-transition class="space-y-4"
+             x-init="if (!hrLoaded) loadHrData();">
+
+      <!-- 사용자 선택 + 서브탭 -->
+      <div class="bg-white border border-slate-200 rounded-2xl p-5">
+        <div class="flex items-center gap-3 mb-4">
+          <span class="text-xs font-bold text-violet-600 uppercase tracking-widest">HR</span>
+          <h2 class="text-sm font-semibold text-slate-700">근태 / 연차 관리</h2>
+          <div class="flex bg-slate-100 rounded-lg p-0.5 ml-2">
+            <button @click="hrTab = 'attendance'"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="hrTab === 'attendance' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">출퇴근</button>
+            <button @click="hrTab = 'leave'; loadLeave()"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="hrTab === 'leave' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">연차</button>
+            <button @click="hrTab = 'calendar'; loadCalendar()"
+                    class="px-3 py-1 text-[10px] rounded-md transition font-medium"
+                    :class="hrTab === 'calendar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'">캘린더</button>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <span class="text-[10px] text-slate-400">사용자:</span>
+            <select x-model="hrUser" @change="resetHrMonthlyDetailPage()" class="text-xs px-2 py-1 rounded-lg border border-slate-200 outline-none bg-white">
+              <option value="">선택</option>
+              <template x-for="m in visibleMembers" :key="'hr-u-' + m">
+                <option :value="m" x-text="m"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+
+        <!-- ── 출퇴근 섹션 ── -->
+        <div x-show="hrTab === 'attendance'" class="space-y-4">
+
+          <!-- 출근/퇴근 버튼 — 로그인한 본인으로 자동 처리 (공용 세션엔 숨김) -->
+          <div x-show="!isLegacy()" class="flex items-center gap-3 p-4 bg-violet-50 rounded-xl border border-violet-200">
+            <span class="text-sm font-medium text-violet-800"
+                  x-text="(currentUser && currentUser.name) ? (currentUser.name + ' 님으로 기록') : '개인 로그인이 필요합니다'"></span>
+            <div class="ml-auto flex gap-2">
+              <button @click="clockIn()" :disabled="!currentUser || !currentUser.name"
+                      class="px-5 py-2 text-sm font-bold rounded-xl transition"
+                      :class="(currentUser && currentUser.name) ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed'">
+                출근
+              </button>
+              <button @click="clockOut()" :disabled="!currentUser || !currentUser.name"
+                      class="px-5 py-2 text-sm font-bold rounded-xl transition"
+                      :class="(currentUser && currentUser.name) ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed'">
+                퇴근
+              </button>
+            </div>
+          </div>
+          <div x-show="isLegacy()" class="text-[11px] text-slate-400 italic">공용 세션에서는 본인 출퇴근을 기록할 수 없습니다. 개인 계정으로 로그인해주세요.</div>
+
+          <!-- 오늘 출퇴근 현황 -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="text-xs font-bold text-slate-600">오늘 출퇴근 현황</h3>
+              <input type="date" x-model="hrAttendanceDate" @change="loadAttendance()"
+                     class="text-[10px] px-2 py-1 border border-slate-200 rounded-lg outline-none ml-auto">
+            </div>
+            <div class="overflow-x-auto rounded-xl border border-slate-200">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-semibold text-slate-600">이름</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">출근</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">퇴근</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">상태</th>
+                    <th class="px-2 py-2 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in visibleProfiles(hrAttendance)" :key="'att-' + row.id">
+                    <tr class="border-b border-slate-50 group">
+                      <td class="px-4 py-2 font-medium text-slate-700" x-text="row.user_name"></td>
+                      <td class="px-4 py-2 text-center text-slate-600 tabular-nums transition"
+                          :class="canEditAttendance(row) ? 'cursor-pointer hover:text-blue-600' : ''"
+                          @click="canEditAttendance(row) && editAttendance(row, 'clock_in')"
+                          x-text="row.clock_in ? row.clock_in.slice(11,16) : '-'"
+                          :title="canEditAttendance(row) ? '클릭하여 수정' : ''"></td>
+                      <td class="px-4 py-2 text-center text-slate-600 tabular-nums transition"
+                          :class="canEditAttendance(row) ? 'cursor-pointer hover:text-blue-600' : ''"
+                          @click="canEditAttendance(row) && editAttendance(row, 'clock_out')"
+                          x-text="row.clock_out ? row.clock_out.slice(11,16) : '-'"
+                          :title="canEditAttendance(row) ? '클릭하여 수정' : ''"></td>
+                      <td class="px-4 py-2 text-center">
+                        <!-- 승인 반차와 출퇴근 기록이 없는 행은 읽기 전용으로 표시한다. -->
+                        <template x-if="canEditAttendance(row) && !hasApprovedHalfDay(row)">
+                          <select class="text-[10px] px-1 py-0.5 rounded-lg border font-bold outline-none cursor-pointer bg-white"
+                                  :class="row.status === '정상' ? 'border-emerald-200 text-emerald-700' : row.status === '지각' ? 'border-red-200 text-red-700' : hasApprovedHalfDay(row) ? 'border-amber-200 text-amber-700' : 'border-slate-200 text-slate-500'"
+                                  :value="row.status"
+                                  @change="editAttendanceStatus(row, $event.target.value)">
+                            <template x-if="!['정상', '지각'].includes(row.status)">
+                              <option :value="row.status || ''" x-text="row.status || '확인 필요'" selected disabled></option>
+                            </template>
+                            <option value="정상">정상</option>
+                            <option value="지각">지각</option>
+                          </select>
+                        </template>
+                        <template x-if="!canEditAttendance(row) || hasApprovedHalfDay(row)">
+                          <span class="text-[10px] px-2 py-0.5 rounded-lg border font-bold inline-block"
+                                :class="row.status === '정상' ? 'border-emerald-200 text-emerald-700' : row.status === '지각' ? 'border-red-200 text-red-700' : hasApprovedHalfDay(row) ? 'border-amber-200 text-amber-700' : 'border-slate-200 text-slate-500'"
+                                x-text="row.status || '-'"></span>
+                        </template>
+                      </td>
+                      <td class="px-2 py-2">
+                        <button x-show="canEditAttendance(row)" @click="deleteAttendance(row)"
+                                class="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-500 text-xs font-bold transition opacity-0 group-hover:opacity-100">&times;</button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div x-show="visibleProfiles(hrAttendance).length === 0 && !hrAttendanceLoading" class="text-center py-6 text-slate-400 text-xs">
+              출퇴근 기록이 없습니다
+            </div>
+          </div>
+
+          <!-- 월간 요약 -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="text-xs font-bold text-slate-600" x-text="hrMonthlySummaryTitle">월간 요약</h3>
+              <select x-model="hrMonthlyYear" @change="resetHrMonthlyDetailPage(); loadMonthly()" class="text-[10px] px-2 py-1 border border-slate-200 rounded-lg outline-none bg-white ml-auto">
+                <option value="2026">2026</option><option value="2025">2025</option>
+              </select>
+              <select x-model="hrMonthlyMonth" @change="resetHrMonthlyDetailPage(); loadMonthly()" class="text-[10px] px-2 py-1 border border-slate-200 rounded-lg outline-none bg-white">
+                <option value="1" :selected="hrMonthlyMonth === '1'">1월</option>
+                <option value="2" :selected="hrMonthlyMonth === '2'">2월</option>
+                <option value="3" :selected="hrMonthlyMonth === '3'">3월</option>
+                <option value="4" :selected="hrMonthlyMonth === '4'">4월</option>
+                <option value="5" :selected="hrMonthlyMonth === '5'">5월</option>
+                <option value="6" :selected="hrMonthlyMonth === '6'">6월</option>
+                <option value="7" :selected="hrMonthlyMonth === '7'">7월</option>
+                <option value="8" :selected="hrMonthlyMonth === '8'">8월</option>
+                <option value="9" :selected="hrMonthlyMonth === '9'">9월</option>
+                <option value="10" :selected="hrMonthlyMonth === '10'">10월</option>
+                <option value="11" :selected="hrMonthlyMonth === '11'">11월</option>
+                <option value="12" :selected="hrMonthlyMonth === '12'">12월</option>
+                <option value="all" :selected="hrMonthlyMonth === 'all'">전체(연간)</option>
+              </select>
+            </div>
+            <div x-show="!hrMonthlyLoading && !hrMonthlyError" class="overflow-x-auto rounded-xl border border-slate-200">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-semibold text-slate-600">이름</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">출근일</th>
+                    <th class="px-4 py-2 text-center font-semibold text-emerald-600">정상</th>
+                    <th class="px-4 py-2 text-center font-semibold text-red-600">지각</th>
+                    <th class="px-4 py-2 text-center font-semibold text-amber-600">오전반차</th>
+                    <th data-hr-monthly-afternoon class="px-4 py-2 text-center font-semibold text-amber-600">오후반차</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in hrMonthlyVisible" :key="'hms-' + row.user_name">
+                    <tr class="border-b border-slate-50">
+                      <td class="px-4 py-2 font-medium text-slate-700" x-text="row.user_name"></td>
+                      <td class="px-4 py-2 text-center text-slate-600" x-text="row.days + '일'"></td>
+                      <td class="px-4 py-2 text-center text-emerald-600 font-medium" x-text="row.normal"></td>
+                      <td class="px-4 py-2 text-center text-red-600 font-medium" x-text="row.late"></td>
+                      <td class="px-4 py-2 text-center text-amber-600 font-medium" x-text="row.morning_half || 0"></td>
+                      <td data-hr-monthly-afternoon class="px-4 py-2 text-center text-amber-600 font-medium" x-text="row.afternoon_half || 0"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div x-show="!hrMonthlyLoading && !hrMonthlyError && hrMonthlyVisible.length === 0" class="text-center py-4 text-slate-400 text-xs">데이터 없음</div>
+            <!-- 월간 조회 안내 시작 -->
+            <div x-show="hrMonthlyLoading" class="text-center py-4 text-slate-400 text-xs">불러오는 중...</div>
+            <div x-show="hrMonthlyError" class="text-center py-4 text-slate-400 text-xs" x-text="hrMonthlyError"></div>
+            <div x-show="!hrMonthlyLoading && !hrMonthlyError && hrMonthlyHalfdayWarningsVisible.length > 0" class="text-[10px] text-slate-400">반차 사용일 확인이 필요한 기록이 있습니다</div>
+            <!-- 근태 범위 안내 시작 -->
+            <div x-show="!hrMonthlyLoading && !hrMonthlyError && hasHrMonthlyCoverageWarning(['missing_hire_date', 'conflicting_hire_dates'])" class="text-[10px] text-slate-400">입사일 확인이 필요한 직원은 미기록 표시를 보류했습니다.</div>
+            <div x-show="!hrMonthlyLoading && !hrMonthlyError && hasHrMonthlyCoverageWarning(['missing_holiday_calendar'])" class="text-[10px] text-slate-400" x-text="hrMonthlyYear + '년 공휴일 정보가 없어 미기록 표시를 보류했습니다.'"></div>
+            <div x-show="!hrMonthlyLoading && !hrMonthlyError && hasHrMonthlyCoverageWarning(['unrecognized_leave_type', 'invalid_approved_leave'])" class="text-[10px] text-slate-400">휴가 사용일 확인이 필요한 기록이 있습니다.</div>
+            <!-- 근태 범위 안내 끝 -->
+            <!-- 월간 조회 안내 끝 -->
+          </div>
+
+          <!-- 월간 상세 시작 -->
+          <div x-show="!hrMonthlyLoading && !hrMonthlyError">
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="text-xs font-bold text-slate-600" x-text="hrMonthlyDetailTitle">월간 출퇴근 상세</h3>
+            </div>
+            <div class="overflow-x-auto rounded-xl border border-slate-200">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-semibold text-slate-600">날짜</th>
+                    <th class="px-4 py-2 text-left font-semibold text-slate-600">이름</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">출근</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">퇴근</th>
+                    <th class="px-4 py-2 text-center font-semibold text-slate-600">근태</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in hrMonthlyRecordsPage" :key="'hmd-' + row.key">
+                    <tr class="border-b border-slate-50">
+                      <td data-hr-missing="date" class="px-4 py-2 font-medium" :class="row.is_missing === true ? 'text-red-600' : 'text-slate-700'" x-text="row.work_date"></td>
+                      <td class="px-4 py-2 font-medium text-slate-700" x-text="row.user_name"></td>
+                      <td data-hr-missing="clock-in" class="px-4 py-2 text-center tabular-nums transition" :class="row.missing_clock_in === true ? 'text-red-600' : 'text-slate-600'" x-text="attendanceTime(row.clock_in)"></td>
+                      <td data-hr-missing="clock-out" class="px-4 py-2 text-center tabular-nums transition" :class="row.missing_clock_out === true ? 'text-red-600' : 'text-slate-600'" x-text="attendanceTime(row.clock_out)"></td>
+                      <td data-hr-missing="status" class="px-4 py-2 text-center" :class="row.is_missing === true ? 'text-red-600' : 'text-slate-600'" x-text="row.status || '—'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div x-show="hrMonthlyRecordsVisible.length === 0" class="text-center py-4 text-slate-400 text-xs">출퇴근 기록이 없습니다</div>
+          </div>
+          <!-- 월간 상세 끝 -->
+          <!-- 연간 상세 페이지 시작 -->
+          <div x-show="hrMonthlyIsAnnual && !hrMonthlyLoading && !hrMonthlyError" class="mt-2 flex items-center gap-2 text-[11px]">
+            <button @click="setHrMonthlyDetailPage(hrMonthlyDetailCurrentPage - 1)" :disabled="hrMonthlyDetailCurrentPage <= 1"
+                    class="px-2 py-1 border border-slate-200 rounded disabled:opacity-30">◀ 이전</button>
+            <span class="text-slate-500 tabular-nums" x-text="hrMonthlyDetailRange"></span>
+            <button @click="setHrMonthlyDetailPage(hrMonthlyDetailCurrentPage + 1)" :disabled="hrMonthlyDetailCurrentPage >= hrMonthlyDetailPageCount"
+                    class="px-2 py-1 border border-slate-200 rounded disabled:opacity-30">다음 ▶</button>
+          </div>
+          <!-- 연간 상세 페이지 끝 -->
+        </div>
+
+        <!-- ── 연차 섹션 ── -->
+        <div x-show="hrTab === 'leave'" class="space-y-4">
+
+          <!-- 연차 잔여 현황 -->
+          <div>
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="text-xs font-bold text-slate-600">연차 현황</h3>
+              <span x-show="isAdmin()" class="text-[10px] text-slate-400">· 카드 클릭 시 총일수 수정</span>
+            </div>
+            <div class="grid grid-cols-3 md:grid-cols-6 gap-2">
+              <template x-for="b in hrLeaveBalanceVisible" :key="'lb-' + b.user_name">
+                <div class="border border-slate-200 rounded-xl p-3 text-center transition"
+                     :class="isAdmin() ? 'cursor-pointer hover:border-violet-400 hover:bg-violet-50' : ''"
+                     @click="isAdmin() && editLeaveBalance(b)">
+                  <span class="text-xs font-bold text-slate-700 block" x-text="b.user_name"></span>
+                  <span class="text-lg font-bold block mt-1"
+                        :class="(b.total_days - b.used_days) <= 3 ? 'text-red-600' : 'text-blue-600'"
+                        x-text="(b.total_days - b.used_days) + '일'"></span>
+                  <span class="text-[10px] text-slate-400 block" x-text="b.used_days + '/' + b.total_days + ' 사용'"></span>
+                  <span class="text-[9px] text-slate-400 block mt-0.5" x-text="b.hire_date ? ('입사 ' + b.hire_date) : '입사일 미등록'"></span>
+                  <span x-show="b.leave_start_date && b.leave_start_date !== b.hire_date"
+                        class="text-[9px] text-violet-500 block font-medium" x-text="'연차기준 ' + b.leave_start_date"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- 연차 신청 버튼 -->
+          <button x-show="!isLegacy()" @click="hrLeaveForm.show = !hrLeaveForm.show"
+                  class="px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition font-medium">
+            + 연차 신청
+          </button>
+
+          <!-- 연차 신청 폼 -->
+          <div x-show="hrLeaveForm.show" x-transition class="p-4 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
+            <div class="grid grid-cols-4 gap-3">
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">신청자</label>
+                <div class="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 text-slate-700 font-medium"
+                     x-text="(currentUser && currentUser.name) ? (currentUser.name + ' (본인)') : '로그인 필요'"></div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">종류</label>
+                <select x-model="hrLeaveForm.leave_type" @change="onLeaveTypeChange()"
+                        class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none bg-white">
+                  <option value="연차">연차</option>
+                  <option value="오전반차">오전반차 (0.5일)</option>
+                  <option value="오후반차">오후반차 (0.5일)</option>
+                  <option value="공가">공가</option>
+                  <option value="경조사">경조사</option>
+                  <option value="무급">무급</option>
+                  <option value="무급오전반차">무급 오전반차 (0.5일)</option>
+                  <option value="무급오후반차">무급 오후반차 (0.5일)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">시작일 <span class="text-red-500">*</span> <span class="text-slate-400 font-normal">(달력 선택)</span></label>
+                <input type="date" x-model="hrLeaveForm.start_date" @change="onLeaveStartChange()"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none cursor-pointer">
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">종료일 <span class="text-red-500">*</span> <span class="text-slate-400 font-normal">(달력 선택)</span></label>
+                <input type="date" x-model="hrLeaveForm.end_date" @change="onLeaveEndChange()"
+                       :disabled="_isLeaveHalfDay(hrLeaveForm.leave_type)"
+                       :class="_isLeaveHalfDay(hrLeaveForm.leave_type) ? 'bg-slate-100 cursor-not-allowed' : 'cursor-pointer'"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none">
+              </div>
+            </div>
+            <div class="grid grid-cols-4 gap-3">
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">일수 <span class="text-slate-400 font-normal">(자동 계산)</span></label>
+                <input type="number" x-model.number="hrLeaveForm.days" min="0.5" step="0.5" readonly
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none bg-slate-50 font-semibold">
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">결재선 <span class="text-slate-400 font-normal">(자동: 1차 PM → 2차 대표)</span></label>
+                <div class="px-2.5 py-1.5 border border-slate-200 rounded-lg text-[10px] bg-slate-50 flex items-center gap-1">
+                  <span class="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-medium" x-text="'1차 PM: ' + leaveApproverPair().pm"></span>
+                  <span class="text-slate-300">&rarr;</span>
+                  <span class="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded font-medium" x-text="'2차 대표: ' + leaveApproverPair().admin"></span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">사유</label>
+                <input x-model="hrLeaveForm.reason" placeholder="사유 입력" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none">
+              </div>
+              <div class="flex items-end gap-2">
+                <button @click="submitLeave()" class="px-4 py-1.5 text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg transition font-medium">신청</button>
+                <button @click="hrLeaveForm.show = false" class="px-4 py-1.5 text-xs text-slate-500 hover:text-slate-700">취소</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 연차 신청 목록 — 공용(legacy) 세션은 통째로 숨김. 백엔드도 admin/pm=전체, member=본인만 -->
+          <div x-show="!isLegacy()">
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="text-xs font-bold text-slate-600">신청 내역</h3>
+              <span class="text-[10px] text-slate-400"
+                    x-text="(isAdmin() || isPm()) ? '· 전체 보기 (관리자/PM)' : '· 본인 신청 내역만'"></span>
+            </div>
+            <div class="overflow-x-auto rounded-xl border border-slate-200">
+              <table class="w-full text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th class="px-3 py-2 text-left font-semibold text-slate-600">신청자</th>
+                    <th class="px-3 py-2 text-left font-semibold text-slate-600">종류</th>
+                    <th class="px-3 py-2 text-left font-semibold text-slate-600">기간</th>
+                    <th class="px-3 py-2 text-center font-semibold text-slate-600">일수</th>
+                    <th class="px-3 py-2 text-left font-semibold text-slate-600">사유</th>
+                    <th class="px-3 py-2 text-center font-semibold text-slate-600">상태</th>
+                    <th class="px-3 py-2 text-center font-semibold text-slate-600 w-32">처리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="req in hrLeaveRequests" :key="'lr-' + req.id">
+                    <tr class="border-b border-slate-50 hover:bg-slate-50 transition">
+                      <td class="px-3 py-2 font-medium text-slate-700" x-text="req.user_name"></td>
+                      <td class="px-3 py-2 text-slate-600" x-text="req.leave_type"></td>
+                      <td class="px-3 py-2 text-slate-600 tabular-nums" x-text="req.start_date === req.end_date ? req.start_date : req.start_date + ' ~ ' + req.end_date"></td>
+                      <td class="px-3 py-2 text-center text-slate-600" x-text="req.days + '일'"></td>
+                      <td class="px-3 py-2 text-slate-500" x-text="req.reason || '-'"></td>
+                      <td class="px-3 py-2 text-center">
+                        <span class="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                              :class="req.status === '승인' ? 'bg-emerald-100 text-emerald-700' : req.status === '반려' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'"
+                              x-text="req.status"></span>
+                        <div class="mt-1 flex flex-col items-center gap-0.5 text-[9px] leading-tight">
+                          <span><span class="text-slate-400">1차 PM</span>
+                            <span :class="(req.pm_status||'대기')==='승인'?'text-emerald-600 font-medium':(req.pm_status||'대기')==='반려'?'text-red-500 font-medium':'text-amber-500'"
+                                  x-text="(req.pm_approver||'-') + ' ' + (req.pm_status||'대기')"></span></span>
+                          <span><span class="text-slate-400">2차 대표</span>
+                            <span :class="(req.admin_status||'대기')==='승인'?'text-emerald-600 font-medium':(req.admin_status||'대기')==='반려'?'text-red-500 font-medium':'text-slate-400'"
+                                  x-text="(req.admin_approver||'-') + ' ' + (req.admin_status||'대기')"></span></span>
+                        </div>
+                      </td>
+                      <td class="px-3 py-2 text-center">
+                        <template x-if="req.status === '대기'">
+                          <div class="flex items-center justify-center gap-1 flex-wrap">
+                            <template x-if="isMyLeaveInbox(req)">
+                              <button @click="approveLeave(req.id, '승인')" class="px-2 py-0.5 text-[10px] bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition font-medium"
+                                      x-text="leaveStageOf(req)==='pm' ? '1차 승인' : '최종 승인'"></button>
+                            </template>
+                            <template x-if="isMyLeaveInbox(req)">
+                              <button @click="approveLeave(req.id, '반려')" class="px-2 py-0.5 text-[10px] bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition font-medium">반려</button>
+                            </template>
+                            <template x-if="currentUser && (req.user_name === currentUser.name || isAdmin())">
+                              <button @click="cancelLeave(req.id)" class="px-2 py-0.5 text-[10px] text-slate-400 hover:text-red-500 transition">취소</button>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="req.status !== '대기'">
+                          <div class="flex items-center justify-center gap-1 flex-wrap">
+                            <span class="text-[10px] text-slate-400" x-text="req.approver ? req.approver + ' 처리' : ''"></span>
+                            <template x-if="isAdmin() || isPm()">
+                              <button @click="cancelLeave(req.id)" class="px-2 py-0.5 text-[10px] text-slate-400 hover:text-red-500 transition">삭제</button>
+                            </template>
+                          </div>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div x-show="hrLeaveRequests.length === 0 && !hrLeaveLoading" class="text-center py-6 text-slate-400 text-xs">연차 신청 내역이 없습니다</div>
+          </div>
+        </div>
+
+        <!-- ── 캘린더 섹션 (월간 그리드) ── -->
+        <div x-show="hrTab === 'calendar'" class="space-y-4">
+          <div class="flex items-center gap-2 mb-2">
+            <button @click="calShiftMonth(-1)"
+                    class="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">‹</button>
+            <h3 class="text-sm font-bold text-slate-700 min-w-[100px] text-center" x-text="calMonthLabel"></h3>
+            <button @click="calShiftMonth(1)"
+                    class="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition">›</button>
+            <button @click="calGoToday()"
+                    class="text-[10px] px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition ml-1">오늘</button>
+            <button @click="loadCalendar()" :disabled="calLoading"
+                    class="text-[10px] px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition ml-auto"
+                    x-text="calLoading ? '로딩...' : '↻'"></button>
+          </div>
+
+          <!-- 일정 추가 버튼 -->
+          <button x-show="!isLegacy()" @click="calEventForm.show = !calEventForm.show"
+                  class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium">
+            + 일정 추가
+          </button>
+
+          <!-- 일정 추가 폼 -->
+          <div x-show="calEventForm.show" x-transition class="p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-3">
+            <div class="grid grid-cols-4 gap-3">
+              <div class="col-span-2">
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">제목 <span class="text-red-500">*</span></label>
+                <input x-model="calEventForm.title" placeholder="예: 팀 회의"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-400">
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">시작일 <span class="text-red-500">*</span></label>
+                <input type="date" x-model="calEventForm.start_date"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">종료일</label>
+                <input type="date" x-model="calEventForm.end_date"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none">
+              </div>
+            </div>
+            <div class="grid grid-cols-4 gap-3">
+              <div>
+                <label class="flex items-center gap-2 text-[10px] text-slate-600 mt-1">
+                  <input type="checkbox" x-model="calEventForm.all_day" class="rounded border-slate-300">
+                  종일
+                </label>
+              </div>
+              <div x-show="!calEventForm.all_day">
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">시작 시간</label>
+                <input type="time" x-model="calEventForm.start_time"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none">
+              </div>
+              <div x-show="!calEventForm.all_day">
+                <label class="block text-[10px] font-medium text-slate-500 mb-1">종료 시간</label>
+                <input type="time" x-model="calEventForm.end_time"
+                       class="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs outline-none">
+              </div>
+              <div class="flex items-end gap-2">
+                <button @click="addCalEvent()" class="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition font-medium">추가</button>
+                <button @click="calEventForm.show = false" class="px-4 py-1.5 text-xs text-slate-500 hover:text-slate-700">취소</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 월간 그리드 (calMoreDate: '+N more' 클릭 시 해당 날짜 전체 일정 팝업) -->
+          <div x-data="{ calMoreDate: '' }" @keydown.escape.window="calMoreDate = ''">
+            <!-- 요일 헤더 (일요일 시작) -->
+            <div class="grid grid-cols-7 gap-1 mb-1 text-[11px] font-bold text-center">
+              <div class="text-red-500 py-1">일</div>
+              <div class="text-slate-500 py-1">월</div>
+              <div class="text-slate-500 py-1">화</div>
+              <div class="text-slate-500 py-1">수</div>
+              <div class="text-slate-500 py-1">목</div>
+              <div class="text-slate-500 py-1">금</div>
+              <div class="text-blue-500 py-1">토</div>
+            </div>
+            <!-- 6주 × 7일 셀 -->
+            <div class="grid grid-cols-7 gap-1">
+              <template x-for="cell in calGrid" :key="'cal-' + cell.date">
+                <div class="min-h-[88px] p-1.5 rounded-lg border text-xs cursor-pointer transition"
+                     :class="[
+                       isHoliday(cell.date) ? 'bg-red-50' : (cell.inMonth ? 'bg-white' : 'bg-slate-50'),
+                       cell.isToday ? 'border-blue-500 ring-1 ring-blue-200' : (isHoliday(cell.date) ? 'border-red-200 hover:border-red-300' : 'border-slate-200 hover:border-blue-300'),
+                     ]"
+                     @click="calOpenEventForm(cell.date)">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-[11px] font-bold"
+                          :class="!cell.inMonth ? 'text-slate-300' :
+                                  cell.isToday ? 'text-blue-700' :
+                                  (isHoliday(cell.date) || cell.isSunday) ? 'text-red-500' :
+                                  cell.isSaturday ? 'text-blue-500' : 'text-slate-700'"
+                          x-text="cell.day"></span>
+                  </div>
+                  <div class="space-y-0.5">
+                    <template x-for="ev in cell.events.slice(0, 3)" :key="'ev-' + ev.id + '-' + cell.date">
+                      <div class="group/ev px-1.5 py-0.5 rounded text-[10px] font-medium truncate flex items-center justify-between gap-1"
+                           :class="ev.isHoliday ? 'bg-red-100 text-red-700' : ev.isLeave ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'"
+                           @click.stop
+                           :title="ev.title + (ev.isMultiDay ? ' (' + ev.endDate + '까지)' : '') + (ev.description ? ' — ' + ev.description : '')">
+                        <span class="truncate flex-1">
+                          <span x-show="!ev.allDay" class="text-[9px] opacity-70 mr-0.5" x-text="ev.startTime"></span>
+                          <span x-text="ev.title"></span>
+                          <span x-show="ev.isMultiDay && ev.isStart" class="text-[9px] opacity-70 ml-0.5">→</span>
+                        </span>
+                        <button x-show="!ev.isHoliday" @click.stop="deleteCalEvent(ev.id)"
+                                class="opacity-0 group-hover/ev:opacity-100 text-slate-400 hover:text-red-500 text-[11px] leading-none px-0.5">×</button>
+                      </div>
+                    </template>
+                    <div x-show="cell.events.length > 3"
+                         class="text-[9px] text-slate-400 hover:text-slate-600 px-1.5 cursor-pointer"
+                         @click.stop="calMoreDate = cell.date"
+                         x-text="'+' + (cell.events.length - 3) + ' more'"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <!-- 날짜별 전체 일정 팝업 -->
+            <div x-show="calMoreDate" x-transition class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" @click.self="calMoreDate = ''" style="display:none">
+              <div class="bg-white rounded-2xl shadow-xl w-[420px] max-h-[90vh] overflow-hidden flex flex-col" @click.stop>
+                <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                  <h3 class="text-sm font-bold text-slate-800"
+                      x-text="calMoreDate ? (Number(calMoreDate.slice(5,7)) + '월 ' + Number(calMoreDate.slice(8,10)) + '일 일정 (' + _eventsForDate(calMoreDate).length + '건)') : ''"></h3>
+                  <button @click="calMoreDate = ''" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+                </div>
+                <div class="p-5 space-y-1.5 overflow-y-auto">
+                  <template x-for="ev in (calMoreDate ? _eventsForDate(calMoreDate) : [])" :key="'more-' + ev.id">
+                    <div class="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between gap-2"
+                         :class="ev.isHoliday ? 'bg-red-100 text-red-700' : ev.isLeave ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'">
+                      <div class="min-w-0 flex-1">
+                        <div class="truncate">
+                          <span x-show="!ev.allDay" class="text-[10px] opacity-70 mr-1" x-text="ev.startTime"></span>
+                          <span x-text="ev.title"></span>
+                        </div>
+                        <div x-show="ev.isMultiDay" class="text-[10px] opacity-70" x-text="'~ ' + ev.endDate + '까지'"></div>
+                        <div x-show="ev.description" class="text-[10px] opacity-70 truncate" x-text="ev.description"></div>
+                      </div>
+                      <button x-show="!ev.isHoliday" @click="deleteCalEvent(ev.id)"
+                              class="text-slate-400 hover:text-red-500 text-sm leading-none px-1">×</button>
+                    </div>
+                  </template>
+                  <div x-show="calMoreDate && _eventsForDate(calMoreDate).length === 0" class="text-center text-xs text-slate-400 py-4">일정이 없습니다.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div x-show="calLoading" class="text-center py-2 text-slate-400 text-xs">로딩 중...</div>
+
+          <div class="flex items-center gap-3 text-[10px] text-slate-500 pt-1">
+            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded bg-violet-200"></span>연차/반차/공가/경조/무급</span>
+            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded bg-red-200"></span>공휴일</span>
+            <span class="ml-auto text-slate-400" x-text="hrUser ? ('* ' + hrUser + ' 님의 연차만 표시 중') : '* 사용자 선택 시 그 사람 연차만 필터'"></span>
+          </div>
+          <p class="text-[10px] text-slate-400">* 연차 승인 시 자동으로 캘린더에 등록됩니다. 회의 일정은 회의록 탭의 캘린더에서 확인하세요.</p>
+        </div>
+      </div>
+    </section>
+    </template>

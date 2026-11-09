@@ -1,0 +1,30 @@
+// Optional Cloudflare Containers template. Configure your own account and origin.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "merlin-weekly-dashboard",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "preview_urls": false,
+  "containers": [
+    {
+      "class_name": "AppContainer",
+      "image": "../Dockerfile",
+      "image_build_context": "..",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "APP", "class_name": "AppContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AppContainer"] }],
+  "vars": {
+    "SLEEP_AFTER": "15m",
+    "PUBLIC_BASE_URL": "",
+    "ALLOWED_ORIGINS": "",
+    "BACKGROUND_TASKS_ENABLED": "false",
+    "STORAGE_AUTO_CREATE_BUCKET": "false"
+  }
+}

@@ -1,0 +1,475 @@
+  <template x-if="activeTab === 'settings'">
+  <section x-transition class="space-y-6 max-w-4xl mx-auto px-4"
+           x-init="loadSettingsData()">
+
+    <!-- 내 프로필 (모두 접근) -->
+    <div class="bg-white border border-slate-200 rounded-2xl p-5">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3">내 프로필</h2>
+      <div class="grid grid-cols-3 gap-3 text-xs">
+        <div><div class="text-[10px] text-slate-400 mb-0.5">이름</div><div class="font-medium" x-text="(currentUser && currentUser.name) || '-'"></div></div>
+        <div><div class="text-[10px] text-slate-400 mb-0.5">이메일</div><div class="font-medium truncate" x-text="(currentUser && currentUser.email) || '-'"></div></div>
+        <div><div class="text-[10px] text-slate-400 mb-0.5">역할</div><div class="font-medium" x-text="isAdmin() ? '대표' : isPm() ? 'PM' : isLegacy() ? '공용' : '실무자'"></div></div>
+      </div>
+      <button x-show="!isLegacy()" @click="settingsPwModal.show = true"
+              class="mt-3 px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg">비밀번호 변경</button>
+    </div>
+
+    <!-- 회사 정보 (모든 직원 열람 / admin·pm만 수정) — 공용(legacy)은 숨김 -->
+    <div x-show="!isLegacy()" class="bg-white border border-slate-200 rounded-2xl p-5"
+         x-init="(() => {
+           if (!teamConfig.company || typeof teamConfig.company !== 'object') teamConfig.company = {};
+           ['name','ceo','address','bizNo','phone','stampUrl'].forEach(k => {
+             if (typeof teamConfig.company[k] !== 'string') teamConfig.company[k] = '';
+           });
+           if (typeof loadBusinessLicenseInfo === 'function') loadBusinessLicenseInfo();
+         })()">
+      <div class="flex items-center gap-2 mb-1">
+        <h2 class="text-sm font-semibold text-slate-700">회사 정보</h2>
+        <span class="text-[10px] text-slate-400" x-text="(isAdmin() || isPm()) ? '· 수정 가능' : '· 읽기 전용'"></span>
+      </div>
+      <p class="text-[10px] text-slate-400 mb-3">재직증명서·개인경비 정산서 인쇄 시 회사명·대표·도장 영역에 사용됩니다.</p>
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <div class="text-[10px] text-slate-400 mb-1">회사명</div>
+          <input x-model="teamConfig.company.name" :disabled="!(isAdmin() || isPm())" placeholder="회사명 입력"
+                 class="w-full px-2 py-1.5 border border-slate-200 rounded disabled:bg-slate-50 disabled:text-slate-500">
+        </div>
+        <div>
+          <div class="text-[10px] text-slate-400 mb-1">대표자명</div>
+          <input x-model="teamConfig.company.ceo" :disabled="!(isAdmin() || isPm())" placeholder="예: 홍길동"
+                 class="w-full px-2 py-1.5 border border-slate-200 rounded disabled:bg-slate-50 disabled:text-slate-500">
+        </div>
+        <div class="col-span-2">
+          <div class="text-[10px] text-slate-400 mb-1">주소</div>
+          <input x-model="teamConfig.company.address" :disabled="!(isAdmin() || isPm())" placeholder="예: 서울특별시 …"
+                 class="w-full px-2 py-1.5 border border-slate-200 rounded disabled:bg-slate-50 disabled:text-slate-500">
+        </div>
+        <div>
+          <div class="text-[10px] text-slate-400 mb-1">사업자등록번호</div>
+          <input x-model="teamConfig.company.bizNo" :disabled="!(isAdmin() || isPm())" placeholder="000-00-00000"
+                 class="w-full px-2 py-1.5 border border-slate-200 rounded disabled:bg-slate-50 disabled:text-slate-500">
+        </div>
+        <div>
+          <div class="text-[10px] text-slate-400 mb-1">전화번호</div>
+          <input x-model="teamConfig.company.phone" :disabled="!(isAdmin() || isPm())" placeholder="02-…"
+                 class="w-full px-2 py-1.5 border border-slate-200 rounded disabled:bg-slate-50 disabled:text-slate-500">
+        </div>
+        <div class="col-span-2" x-show="isAdmin() || isPm()">
+          <div class="text-[10px] text-slate-400 mb-1">도장 이미지 URL (선택)</div>
+          <input x-model="teamConfig.company.stampUrl" placeholder="https://… (PNG 권장)"
+                 class="w-full px-2 py-1.5 border border-slate-200 rounded font-mono">
+          <p class="text-[10px] text-slate-400 mt-1">* 비워두면 "(인)" 글자가 표시됩니다.</p>
+        </div>
+      </div>
+      <!-- 사업자등록증 다운로드 (전 직원) + 저장 (admin/pm) -->
+      <div class="mt-3 flex items-center gap-2 flex-wrap">
+        <button x-show="businessLicense.exists" @click="downloadBusinessLicense()"
+                class="px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg font-medium">
+          📄 사업자등록증 다운로드
+          <span class="text-[10px] text-blue-400" x-text="businessLicense.filename ? ('· ' + businessLicense.filename) : ''"></span>
+        </button>
+        <span x-show="!businessLicense.exists" class="text-[10px] text-slate-400">사업자등록증 미등록</span>
+        <button x-show="isAdmin() || isPm()" @click="saveCompanyInfo()"
+                class="ml-auto px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-800 text-white rounded font-medium">저장</button>
+      </div>
+    </div>
+
+    <!-- 이하 admin/pm -->
+    <template x-if="isAdmin() || isPm()">
+      <div class="space-y-6">
+        <!-- 시스템 정보 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <div class="flex items-center mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">시스템 정보</h2>
+            <button @click="loadSettingsData()" class="ml-auto text-[10px] px-2 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50">새로고침</button>
+          </div>
+          <template x-if="settingsSystemInfo">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div><div class="text-[10px] text-slate-400">환경</div><div class="font-mono font-medium" x-text="settingsSystemInfo.railway_env"></div></div>
+              <div><div class="text-[10px] text-slate-400">DB</div><div class="font-medium" :class="settingsSystemInfo.db_status === 'OK' ? 'text-emerald-600' : 'text-red-600'" x-text="settingsSystemInfo.db_status"></div></div>
+              <div><div class="text-[10px] text-slate-400">Linear</div><div class="font-medium" :class="settingsSystemInfo.linear_status === '연결됨' ? 'text-emerald-600' : 'text-amber-600'" x-text="settingsSystemInfo.linear_status"></div></div>
+              <div><div class="text-[10px] text-slate-400">Slack</div><div class="font-medium" :class="settingsSystemInfo.slack_status === '연결됨' ? 'text-emerald-600' : 'text-amber-600'" x-text="settingsSystemInfo.slack_status"></div></div>
+              <div><div class="text-[10px] text-slate-400">App 버전</div><div class="font-mono" x-text="settingsSystemInfo.app_version"></div></div>
+              <div><div class="text-[10px] text-slate-400">Python</div><div class="font-mono" x-text="settingsSystemInfo.python_version"></div></div>
+              <div><div class="text-[10px] text-slate-400">Linear 캐시</div><div class="font-mono" x-text="settingsSystemInfo.cache ? `${settingsSystemInfo.cache.active_entries} / ${settingsSystemInfo.cache.total_entries}` : '-'"></div></div>
+              <div><button @click="clearLinearCache()" class="text-[10px] px-2 py-1 border border-slate-200 rounded text-slate-600 hover:bg-slate-50">캐시 초기화</button></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 결재 승인자 설정 (admin/pm) -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5"
+             x-init="loadApprovalSettings(); if (!hrApprovers || hrApprovers.length === 0) { _authFetch(API_BASE + '/api/users/approvers').then(async r => { if (r.ok) hrApprovers = (await r.json()).approvers || []; }); }">
+          <h2 class="text-sm font-semibold text-slate-700 mb-1">결재 승인자 설정</h2>
+          <p class="text-[10px] text-slate-500 mb-3">유형별 1차 PM &rarr; 2차 대표(관리자) 결재선. 신청 시 자동 배정됩니다. 변경 즉시 저장.</p>
+          <div class="grid grid-cols-[80px_1fr_1fr] gap-2 text-[10px] text-slate-400 px-1 mb-1">
+            <div></div><div>1차 PM</div><div>2차 대표(관리자)</div>
+          </div>
+          <div class="space-y-2">
+            <template x-for="t in ['leave','personal_expense','cert_employment','book_purchase']" :key="'sett-tc-'+t">
+              <div class="grid grid-cols-[80px_1fr_1fr] gap-2 items-center">
+                <span class="text-xs text-slate-600 font-medium" x-text="approvalTypeLabel(t)"></span>
+                <select :value="(approvalTypeApprovers[t]||{}).pm"
+                        x-init="$nextTick(() => { $el.value = ((approvalTypeApprovers[t]||{}).pm) || '' })"
+                        @change="approvalTypeApprovers[t] = { ...(approvalTypeApprovers[t]||{}), pm: $event.target.value }; saveApprovalTypeApprovers()"
+                        class="text-xs px-2 py-1 border border-slate-200 rounded outline-none bg-white">
+                  <option value="">선택</option>
+                  <template x-for="a in hrApprovers.filter(x => x.role === 'pm' && isVisibleProfile(x))" :key="'sett-pm-'+t+'-'+a.name"><option :value="a.name" x-text="a.name"></option></template>
+                </select>
+                <select :value="(approvalTypeApprovers[t]||{}).admin"
+                        x-init="$nextTick(() => { $el.value = ((approvalTypeApprovers[t]||{}).admin) || '' })"
+                        @change="approvalTypeApprovers[t] = { ...(approvalTypeApprovers[t]||{}), admin: $event.target.value }; saveApprovalTypeApprovers()"
+                        class="text-xs px-2 py-1 border border-slate-200 rounded outline-none bg-white">
+                  <option value="">선택</option>
+                  <template x-for="a in hrApprovers.filter(x => x.role === 'admin' && isVisibleProfile(x))" :key="'sett-ad-'+t+'-'+a.name"><option :value="a.name" x-text="a.name"></option></template>
+                </select>
+              </div>
+            </template>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2">* 결재자를 직접 설정하세요. 비워두면 설치자가 지정한 기본 결재선을 사용하며, 기본 결재선도 없으면 신청할 수 없습니다.</p>
+        </div>
+
+        <!-- Slack 봇 토큰 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">Slack 봇 토큰</h2>
+          <p class="text-[10px] text-slate-500 mb-2">xoxb- 로 시작하는 봇 토큰. auth.test 통과해야 저장됩니다.</p>
+          <div class="flex gap-2">
+            <input x-model="settingsSlackToken" type="password" placeholder="xoxb-..."
+                   class="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono outline-none focus:border-indigo-400">
+            <button @click="saveSlackToken()" :disabled="settingsSlackSaving"
+                    class="px-3 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium disabled:opacity-50">저장·검증</button>
+          </div>
+          <div class="mt-3 flex gap-2">
+            <button @click="sendSlackReminder()" class="px-3 py-1.5 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg">📝 주간 보고 리마인더 일괄 발송</button>
+          </div>
+        </div>
+
+        <!-- AI 자동화 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">AI 자동화 (Gemini)</h2>
+          <div class="flex gap-2 mb-3">
+            <button @click="runWeeklySummary()" :disabled="settingsAiBusy"
+                    class="px-3 py-2 text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg font-medium disabled:opacity-50">
+              <span x-text="settingsAiBusy ? '생성 중...' : '🧠 주간 종합 요약 생성'"></span>
+            </button>
+            <button @click="runAnomalyCheck()" :disabled="settingsAiBusy"
+                    class="px-3 py-2 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium disabled:opacity-50">⚠️ 이상 감지 실행</button>
+          </div>
+          <div x-show="settingsAiSummary" class="text-xs text-slate-700 whitespace-pre-wrap bg-slate-50 border border-slate-200 rounded-lg p-3 max-h-[300px] overflow-y-auto"
+               x-text="settingsAiSummary"></div>
+          <div x-show="settingsAnomalies.length > 0" class="mt-3 space-y-1">
+            <template x-for="a in settingsAnomalies" :key="a.name + a.type">
+              <div class="text-xs flex items-center gap-2 px-2 py-1.5 rounded border"
+                   :class="a.severity === 'high' ? 'bg-red-50 border-red-200 text-red-700' : a.severity === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-600'">
+                <span class="font-bold" x-text="a.severity"></span>
+                <span x-text="a.name"></span>
+                <span class="text-slate-500" x-text="'· ' + a.detail"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Linear Webhook -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">Linear Webhook</h2>
+          <p class="text-[10px] text-slate-500 mb-2">Linear → Settings → API → Webhooks 에서 아래 URL로 등록. Secret은 Railway env <code class="font-mono">LINEAR_WEBHOOK_SECRET</code> 에 동일하게.</p>
+          <div class="flex gap-2 items-center">
+            <input :value="webhookUrl" readonly class="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50">
+            <button @click="navigator.clipboard.writeText(webhookUrl); showToast('success', 'URL 복사됨')"
+                    class="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg">복사</button>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2">이벤트: Issues, Projects, Cycles · 수신 시 Linear 캐시 자동 무효화.</p>
+        </div>
+
+        <!-- 백업 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <div class="flex items-center mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">백업 (ext_backups)</h2>
+            <button @click="createManualBackup()" class="ml-auto px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg">+ 수동 백업</button>
+          </div>
+          <p class="text-[10px] text-slate-500 mb-2">리포트 저장 시마다 이전 버전이 자동 백업됩니다 (auto, 최대 50건).</p>
+          <div class="border border-slate-200 rounded-lg overflow-hidden">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50 text-[10px] text-slate-500 uppercase">
+                <tr><th class="px-3 py-2 text-left w-40">ID</th><th class="text-left w-20">종류</th><th class="text-left">생성</th><th></th></tr>
+              </thead>
+              <tbody>
+                <template x-for="b in settingsBackups" :key="'bk-'+b.id">
+                  <tr class="border-t border-slate-100">
+                    <td class="px-3 py-1.5 font-mono text-[11px] truncate" x-text="b.id"></td>
+                    <td class="text-[11px]" :class="b.backup_type === 'manual' ? 'text-blue-600' : 'text-slate-500'" x-text="b.backup_type"></td>
+                    <td class="text-[11px] tabular-nums" x-text="(b.created_at || '').slice(0,19).replace('T',' ')"></td>
+                    <td class="text-right pr-3"><button @click="restoreBackup(b.id)" class="text-[10px] px-2 py-1 border border-amber-200 text-amber-600 rounded hover:bg-amber-50">복원</button></td>
+                  </tr>
+                </template>
+                <tr x-show="settingsBackups.length === 0"><td colspan="4" class="px-3 py-6 text-center text-[11px] text-slate-400">백업 없음</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 사용자 관리 (풀) — 이름·이메일·역할·Slack ID·입사일 인라인 편집 + 활성 토글 + 비번 초기화 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <div class="flex items-center mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">사용자 관리</h2>
+            <button @click="openAddUserModal()" class="ml-auto px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium">+ 신규 사용자</button>
+          </div>
+          <div class="border border-slate-200 rounded-lg overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50 text-[10px] text-slate-500 uppercase">
+                <tr>
+                  <th class="px-3 py-2 text-left">이름</th>
+                  <th class="text-left">이메일</th>
+                  <th class="text-left w-24">역할</th>
+                  <th class="text-left w-32">Slack ID</th>
+                  <th class="text-left w-28">입사일</th>
+                  <th class="text-left w-28">연차 기준일</th>
+                  <th class="text-center w-16">활성</th>
+                  <th class="text-right pr-3 w-40">액션</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="u in visibleProfiles(settingsUsers)" :key="'us-'+u.id">
+                  <tr class="border-t border-slate-100" :class="!u.is_active ? 'opacity-50' : ''">
+                    <td class="px-3 py-1.5 font-medium" x-text="u.name"></td>
+                    <td class="text-slate-500 truncate" x-text="u.email"></td>
+                    <td>
+                      <select :value="u.role" @change="saveUserField(u, 'role', $event.target.value)"
+                              class="text-[11px] px-1 py-0.5 border border-slate-200 rounded outline-none bg-white">
+                        <option value="admin">대표</option>
+                        <option value="pm">PM</option>
+                        <option value="member">실무자</option>
+                      </select>
+                    </td>
+                    <td><input type="text" :value="u.slack_id || ''" placeholder="U01ABC..."
+                               @blur="if($event.target.value !== (u.slack_id||'')) saveUserField(u, 'slack_id', $event.target.value)"
+                               class="w-full text-[11px] px-1.5 py-0.5 border border-slate-200 rounded outline-none font-mono"></td>
+                    <td><input type="date" :value="(u.hire_date||'').slice(0,10)"
+                               @change="saveUserField(u, 'hire_date', $event.target.value)"
+                               class="text-[11px] px-1 py-0.5 border border-slate-200 rounded outline-none"
+                               title="실제 입사일 — 인사 기록용"></td>
+                    <td><input type="date" :value="(u.leave_start_date||'').slice(0,10)"
+                               @change="saveUserField(u, 'leave_start_date', $event.target.value)"
+                               class="text-[11px] px-1 py-0.5 border border-slate-200 rounded outline-none"
+                               title="연차 산정 기준일 — 비어 있으면 실제 입사일 사용"
+                               :placeholder="(u.hire_date||'').slice(0,10) || '입사일과 동일'"></td>
+                    <td class="text-center">
+                      <button @click="toggleUserActive(u)" :class="u.is_active ? 'bg-emerald-500' : 'bg-slate-300'"
+                              class="relative w-10 h-5 rounded-full transition" :title="u.is_active ? '활성' : '비활성'">
+                        <span class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition" :class="u.is_active ? 'translate-x-5' : ''"></span>
+                      </button>
+                    </td>
+                    <td class="text-right pr-3"><button @click="resetUserPassword(u)" class="text-[10px] px-2 py-1 border border-slate-200 rounded text-slate-600 hover:bg-slate-50">비번 초기화</button></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2">* Slack ID는 직원 DM 알림을 받으려면 필수. <strong>연차 기준일</strong>은 실제 입사일과 다른 경우(경력 인정 등)에 사용 — 비어 있으면 실제 입사일이 사용됩니다. 비활성 시 즉시 강제 로그아웃.</p>
+        </div>
+
+        <!-- 자동 스케줄 + 백업 보관 갯수 + Slack 에러 채널 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">자동 스케줄 / 알림</h2>
+          <template x-if="settingsExt.systemSettings">
+            <div class="space-y-3 text-xs" x-data="{ ss: JSON.parse(JSON.stringify(settingsExt.systemSettings)) }">
+              <div class="flex items-center gap-3 flex-wrap">
+                <label class="flex items-center gap-1.5"><input type="checkbox" x-model="ss.schedule.remind_report.enabled"> 주간 보고 리마인더</label>
+                <select x-model.number="ss.schedule.remind_report.weekday" class="text-xs px-2 py-1 border border-slate-200 rounded bg-white">
+                  <option value="0">월</option><option value="1">화</option><option value="2">수</option>
+                  <option value="3">목</option><option value="4">금</option><option value="5">토</option><option value="6">일</option>
+                </select>
+                <input type="number" min="0" max="23" x-model.number="ss.schedule.remind_report.hour" class="w-14 text-xs px-2 py-1 border border-slate-200 rounded">시
+                <input type="number" min="0" max="59" x-model.number="ss.schedule.remind_report.minute" class="w-14 text-xs px-2 py-1 border border-slate-200 rounded">분
+              </div>
+              <div class="flex items-center gap-3 flex-wrap">
+                <label class="flex items-center gap-1.5"><input type="checkbox" x-model="ss.schedule.anomaly_check.enabled"> 매일 이상 감지</label>
+                <input type="number" min="0" max="23" x-model.number="ss.schedule.anomaly_check.hour" class="w-14 text-xs px-2 py-1 border border-slate-200 rounded">시
+                <input type="number" min="0" max="59" x-model.number="ss.schedule.anomaly_check.minute" class="w-14 text-xs px-2 py-1 border border-slate-200 rounded">분
+              </div>
+              <div class="flex items-center gap-3 flex-wrap">
+                <label class="w-32">Slack 에러 채널 ID</label>
+                <input type="text" x-model="ss.slack_error_channel" placeholder="C01ABCDEF" class="flex-1 text-xs px-2 py-1 border border-slate-200 rounded font-mono">
+              </div>
+              <div class="flex items-center gap-3">
+                <label class="w-32">자동 백업 보관 갯수</label>
+                <input type="number" min="5" max="500" x-model.number="ss.backup_keep_count" class="w-24 text-xs px-2 py-1 border border-slate-200 rounded">
+                <span class="text-[10px] text-slate-400">최근 N개만 유지 (auto), 초과 시 자동 삭제</span>
+              </div>
+              <button @click="saveSystemSettings({ schedule: ss.schedule, slack_error_channel: ss.slack_error_channel, backup_keep_count: ss.backup_keep_count })"
+                      class="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">스케줄/설정 저장</button>
+            </div>
+          </template>
+        </div>
+
+        <!-- API 키 (Linear/Gemini) -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">API 키 (DB 우선, env 폴백)</h2>
+          <template x-if="settingsExt.systemSettings">
+            <div class="space-y-3 text-xs" x-data="{ giminiInput: '', linearInput: '' }">
+              <div class="flex items-center gap-2">
+                <label class="w-24">Gemini API</label>
+                <span class="text-slate-500" x-text="settingsExt.systemSettings.gemini_api_key_set ? ('현재: ' + settingsExt.systemSettings.gemini_api_key_masked) : '미설정 (env 사용 중)'"></span>
+              </div>
+              <div class="flex gap-2">
+                <input type="password" x-model="giminiInput" placeholder="새 Gemini API key" class="flex-1 text-xs px-2 py-1 border border-slate-200 rounded font-mono">
+                <button @click="if (giminiInput) { saveSystemSettings({ gemini_api_key: giminiInput }); giminiInput = '' }" class="px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-700 text-white rounded">저장</button>
+              </div>
+              <div class="flex items-center gap-2 mt-3">
+                <label class="w-24">Linear API</label>
+                <span class="text-slate-500" x-text="settingsExt.systemSettings.linear_api_key_set ? ('현재: ' + settingsExt.systemSettings.linear_api_key_masked) : '미설정 (env 사용 중)'"></span>
+              </div>
+              <div class="flex gap-2">
+                <input type="password" x-model="linearInput" placeholder="새 Linear API key (lin_api_...)" class="flex-1 text-xs px-2 py-1 border border-slate-200 rounded font-mono">
+                <button @click="if (linearInput) { saveSystemSettings({ linear_api_key: linearInput }); linearInput = '' }" class="px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-700 text-white rounded">저장</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 공휴일 관리 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">공휴일 (휴무일)</h2>
+          <div class="flex gap-2 mb-3">
+            <input type="date" x-model="settingsHolidayForm.date" class="text-xs px-2 py-1 border border-slate-200 rounded">
+            <input type="text" x-model="settingsHolidayForm.name" placeholder="예: 어린이날" class="flex-1 text-xs px-2 py-1 border border-slate-200 rounded">
+            <button @click="addHoliday()" class="px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded">+ 추가</button>
+          </div>
+          <div class="grid grid-cols-3 gap-1.5 text-xs">
+            <template x-for="h in settingsExt.holidays" :key="'hd-'+h.date">
+              <div class="flex items-center gap-2 px-2 py-1 bg-slate-50 rounded border border-slate-200">
+                <span class="font-mono tabular-nums" x-text="h.date"></span>
+                <span class="text-slate-500 flex-1 truncate" x-text="h.name || '-'"></span>
+                <button @click="deleteHoliday(h.date)" class="text-slate-400 hover:text-red-500">&times;</button>
+              </div>
+            </template>
+            <div x-show="settingsExt.holidays.length === 0" class="col-span-3 text-center text-[11px] text-slate-400 py-3">등록된 공휴일 없음</div>
+          </div>
+        </div>
+
+        <!-- 에러 로그 뷰어 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <div class="flex items-center mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">에러 로그 (최근 50건)</h2>
+            <button @click="loadSettingsData()" class="ml-auto text-[10px] px-2 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50">새로고침</button>
+          </div>
+          <div class="space-y-1 max-h-[280px] overflow-y-auto">
+            <template x-for="l in settingsExt.errorLogs" :key="'el-'+l.id">
+              <div class="text-[11px] flex items-center gap-2 px-2 py-1.5 rounded border"
+                   :class="l.source === 'frontend' ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'">
+                <span class="text-[9px] font-bold uppercase" x-text="l.source"></span>
+                <span class="font-mono text-[10px]" x-text="l.type"></span>
+                <span class="flex-1 truncate" x-text="l.message"></span>
+                <span class="text-[9px] text-slate-400 tabular-nums" x-text="(l.created_at || '').slice(5,16).replace('T',' ')"></span>
+              </div>
+            </template>
+            <div x-show="settingsExt.errorLogs.length === 0" class="text-center text-[11px] text-slate-400 py-3">에러 없음 ✨</div>
+          </div>
+        </div>
+
+        <!-- AI 요약 히스토리 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">AI 요약 히스토리 (최근 10건)</h2>
+          <div class="space-y-2 max-h-[280px] overflow-y-auto">
+            <template x-for="s in settingsExt.aiHistory" :key="'ai-'+s.id">
+              <details class="border border-slate-200 rounded-lg">
+                <summary class="cursor-pointer px-3 py-2 text-[11px] flex items-center gap-2 hover:bg-slate-50">
+                  <span class="font-bold text-violet-600" x-text="s.kind"></span>
+                  <span class="text-slate-500" x-text="(s.summary || '').slice(0,60) + '...'"></span>
+                  <span class="ml-auto text-[10px] text-slate-400 tabular-nums" x-text="(s.created_at || '').slice(5,16).replace('T',' ')"></span>
+                </summary>
+                <pre class="px-3 py-2 text-xs text-slate-700 whitespace-pre-wrap bg-slate-50 border-t border-slate-100" x-text="s.summary"></pre>
+              </details>
+            </template>
+            <div x-show="settingsExt.aiHistory.length === 0" class="text-center text-[11px] text-slate-400 py-3">요약 기록 없음</div>
+          </div>
+        </div>
+
+        <!-- 데이터 내보내기 -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5">
+          <h2 class="text-sm font-semibold text-slate-700 mb-3">데이터 내보내기 (CSV)</h2>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <button @click="exportDownload('leave')" class="px-3 py-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg">📥 연차 내역</button>
+            <button @click="exportDownload('expenses')" class="px-3 py-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg">📥 비용 내역</button>
+            <button @click="exportDownload('reports')" class="px-3 py-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg">📥 주간 보고</button>
+            <button @click="exportDownload('users')" class="px-3 py-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg">📥 사용자 목록</button>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2">* Excel 한글 호환 UTF-8 BOM 포함</p>
+        </div>
+
+        <!-- 활동 로그 (Audit Trail) -->
+        <div class="bg-white border border-slate-200 rounded-2xl p-5"
+             x-init="if (activityLogs.items.length === 0) loadActivityLogs(true)">
+          <div class="flex items-center mb-3">
+            <h2 class="text-sm font-semibold text-slate-700">활동 로그 (감사 추적)</h2>
+            <span class="ml-2 text-[10px] text-slate-400" x-text="'총 ' + activityLogs.total + '건'"></span>
+            <button @click="loadActivityLogs(true)" class="ml-auto text-[10px] px-2 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50">새로고침</button>
+            <button @click="exportActivityLogsCsv()" class="ml-2 text-[10px] px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded">📥 CSV</button>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 text-xs">
+            <input x-model.debounce.400ms="activityLogs.filter.user"
+                   @input.debounce.400ms="loadActivityLogs(true)"
+                   placeholder="사용자 이름 (자동검색)" class="px-2 py-1.5 border border-slate-200 rounded">
+            <input x-model.debounce.400ms="activityLogs.filter.action"
+                   @input.debounce.400ms="loadActivityLogs(true)"
+                   placeholder="액션 부분일치 (자동검색)" class="px-2 py-1.5 border border-slate-200 rounded">
+            <select x-model="activityLogs.filter.target_type" @change="loadActivityLogs(true)" class="px-2 py-1.5 border border-slate-200 rounded">
+              <option value="">전체 대상</option>
+              <option value="approval">결재</option>
+              <option value="leave">연차</option>
+              <option value="attendance">근태</option>
+              <option value="user">사용자</option>
+              <option value="team_config">팀 설정</option>
+              <option value="approval_settings">결재 설정</option>
+              <option value="backup">백업</option>
+            </select>
+            <input type="date" x-model="activityLogs.filter.start" @change="loadActivityLogs(true)" class="px-2 py-1.5 border border-slate-200 rounded" title="시작일">
+            <input type="date" x-model="activityLogs.filter.end" @change="loadActivityLogs(true)" class="px-2 py-1.5 border border-slate-200 rounded" title="종료일">
+          </div>
+          <div class="overflow-x-auto border border-slate-100 rounded-lg">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50">
+                <tr class="text-slate-500">
+                  <th class="text-left px-2 py-2 whitespace-nowrap">시각</th>
+                  <th class="text-left px-2 py-2 whitespace-nowrap">사용자</th>
+                  <th class="text-left px-2 py-2 whitespace-nowrap">역할</th>
+                  <th class="text-left px-2 py-2 whitespace-nowrap">액션</th>
+                  <th class="text-left px-2 py-2 whitespace-nowrap">대상</th>
+                  <th class="text-left px-2 py-2">상세</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="log in activityLogs.items" :key="log.id">
+                  <tr class="border-t border-slate-100 hover:bg-slate-50">
+                    <td class="px-2 py-1.5 text-slate-500 tabular-nums whitespace-nowrap" x-text="(log.created_at || '').slice(0,19).replace('T',' ')"></td>
+                    <td class="px-2 py-1.5 font-medium whitespace-nowrap" x-text="log.user_name || '-'"></td>
+                    <td class="px-2 py-1.5 whitespace-nowrap">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded"
+                            :class="log.user_role === 'admin' ? 'bg-red-100 text-red-600' : log.user_role === 'pm' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-500'"
+                            x-text="log.user_role || '-'"></span>
+                    </td>
+                    <td class="px-2 py-1.5 font-medium text-slate-700 whitespace-nowrap" x-text="log.action"></td>
+                    <td class="px-2 py-1.5 text-slate-500 whitespace-nowrap" x-text="(log.target_type || '-') + (log.target_id ? ' #' + (log.target_id.length > 8 ? log.target_id.slice(0,8)+'…' : log.target_id) : '')"></td>
+                    <td class="px-2 py-1.5 text-slate-500 text-[11px]" x-text="fmtActivityDetail(log.detail)"></td>
+                  </tr>
+                </template>
+                <tr x-show="activityLogs.items.length === 0">
+                  <td colspan="6" class="px-2 py-6 text-center text-slate-400" x-text="activityLogs.loading ? '불러오는 중...' : '기록 없음'"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-2 flex items-center gap-2 text-[11px]">
+            <button @click="activityLogsPrevPage()" :disabled="activityLogs.offset === 0"
+                    class="px-2 py-1 border border-slate-200 rounded disabled:opacity-30">◀ 이전</button>
+            <span class="text-slate-500 tabular-nums"
+                  x-text="(activityLogs.offset + 1) + '–' + Math.min(activityLogs.offset + activityLogs.limit, activityLogs.total) + ' / ' + activityLogs.total"></span>
+            <button @click="activityLogsNextPage()" :disabled="activityLogs.offset + activityLogs.limit >= activityLogs.total"
+                    class="px-2 py-1 border border-slate-200 rounded disabled:opacity-30">다음 ▶</button>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2">* 결재·연차·근태·사용자·설정·백업 변경 이력. 권한·역할별 필터 가능.</p>
+        </div>
+      </div>
+    </template>
+  </section>
+  </template>

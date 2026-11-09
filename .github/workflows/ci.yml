@@ -1,0 +1,118 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/testdb
+      DASH_BASE: http://127.0.0.1:8000
+      LOCAL_TESTS_ENABLED: "1"
+      SMOKE_CI: "1"
+      SMOKE_EMAIL: member@example.test
+      BACKGROUND_TASKS_ENABLED: "false"
+      STORAGE_AUTO_CREATE_BUCKET: "false"
+      EGRESS_DIAGNOSTICS_ENABLED: "false"
+      SEED_KOREAN_HOLIDAYS: "false"
+      LEGACY_SHARED_LOGIN_ENABLED: "false"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            cf/package-lock.json
+      - name: Audit public snapshot before execution
+        run: python scripts/check_release.py
+      - name: Install locked dependencies
+        run: |
+          pip install -r requirements.txt
+          pip check
+          npm ci --no-audit --no-fund
+          npm --prefix cf ci --no-audit --no-fund
+      - name: Generate isolated test credentials
+        run: |
+          python - <<'PY'
+          import os,secrets
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              for name in ['JWT_SECRET','SMOKE_PW']:
+                  value=secrets.token_urlsafe(48)
+                  print('::add-mask::'+value)
+                  output.write(name+'='+value+'\n')
+          PY
+      - name: Offline Python and browser behavior regressions
+        run: |
+          python -m compileall -q src scripts tests
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python tests/ci_test.py
+          npm run check:js
+          npm run test:frontend
+      - name: Verify generated assets and optional worker types
+        run: |
+          python scripts/build_cs_app.py --check
+          npm run css:build
+          git diff --exit-code -- static/tailwind.css src/cs_app.html
+          npm --prefix cf run typecheck
+      - name: Empty database startup and isolated API smoke
+        run: |
+          python -m uvicorn src.main:app --host 127.0.0.1 --port 8000 > app.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fs http://127.0.0.1:8000/api/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8000/api/health
+          python scripts/seed_test_db.py
+          python tests/check_attendance_ci.py
+          python tests/smoke_test.py
+      - name: Final privacy audit
+        run: python scripts/check_release.py
+  container-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: merlin-weekly-ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate fresh local environment without printing credentials
+        run: python scripts/setup_env.py
+      - name: Build and start a new Compose installation
+        run: docker compose up --build -d db app
+      - name: Verify first administrator and authentication inside the real image
+        run: python scripts/check_container_install.py
+      - name: Remove only this disposable CI project
+        if: always()
+        run: docker compose down --volumes --remove-orphans

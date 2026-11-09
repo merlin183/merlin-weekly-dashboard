@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>로그인</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--line:#262a33;--txt:#e8eaed;--muted:#9aa0aa;--accent:#5b8cff;--bad:#ff6b6b}
+  *{box-sizing:border-box} html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+  #wrap{min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:32px;width:320px;text-align:center}
+  .box h1{font-size:17px;margin:0 0 18px}
+  input{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:#0c0e12;color:var(--txt);font-size:14px;outline:none}
+  input:focus{border-color:var(--accent)}
+  button{cursor:pointer;border:none;border-radius:10px;font-size:14px;font-weight:600;background:var(--accent);color:#fff;padding:12px 16px;width:100%;margin-top:12px}
+  .err{color:var(--bad);font-size:13px;margin-top:10px;min-height:18px}
+  .load{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="box">
+    <h1>🔒 로그인</h1>
+    <div id="form">
+      <input id="pw" type="password" placeholder="비밀번호" autocomplete="current-password" />
+      <button id="go">들어가기</button>
+      <div class="err" id="err"></div>
+    </div>
+    <div id="loading" class="load" style="display:none">불러오는 중…</div>
+  </div>
+</div>
+<script>
+// 전역 오염 방지 — 본체(cs_app)가 document.write 후 같은 window에서 const $ 등을 재선언하므로
+// 껍데기 선언은 반드시 IIFE로 가둔다(안 그러면 "Identifier '$' has already been declared"로 본체가 죽음).
+(function(){
+const K="cs_token";
+const $=(i)=>document.getElementById(i);
+async function loadApp(token){
+  $("form").style.display="none"; $("loading").style.display="block";
+  let r;
+  try{ r=await fetch("/api/cs/app",{headers:{Authorization:"Bearer "+token}}); }
+  catch(e){ fail("네트워크 오류"); return; }
+  if(r.status===401){ localStorage.removeItem(K); fail("세션이 만료되었습니다. 다시 로그인하세요."); return; }
+  if(!r.ok){ fail("로드 실패 ("+r.status+")"); return; }
+  const b64=await r.text();
+  let html;
+  try{
+    const bin=atob(b64), bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+    html=new TextDecoder("utf-8").decode(bytes);
+  }catch(e){ fail("디코드 실패"); return; }
+  document.open(); document.write(html); document.close();
+}
+function fail(msg){ $("loading").style.display="none"; $("form").style.display="block"; $("err").textContent=msg; }
+async function login(){
+  $("err").textContent="";
+  let r;
+  try{
+    r=await fetch("/api/cs/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("pw").value})});
+  }catch(e){ $("err").textContent="네트워크 오류"; return; }
+  if(!r.ok){ const e=await r.json().catch(()=>({})); $("err").textContent=e.error||"로그인 실패"; return; }
+  const d=await r.json(); localStorage.setItem(K,d.token); loadApp(d.token);
+}
+$("go").onclick=login;
+$("pw").addEventListener("keydown",e=>{ if(e.key==="Enter") login(); });
+const t=localStorage.getItem(K);
+if(t) loadApp(t); else $("pw").focus();
+})();
+</script>
+</body>
+</html>

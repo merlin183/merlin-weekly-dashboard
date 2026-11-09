@@ -1,0 +1,2 @@
+# Install the pinned Python 3.12 dependency set.
+-r requirements.lock
